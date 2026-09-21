@@ -141,3 +141,45 @@ async def test_reactions_disabled_via_env(adapter, monkeypatch):
     adapter.send.assert_awaited_once()
 
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,final_emoji", [
+    (ProcessingOutcome.SUCCESS, "✅"),
+    (ProcessingOutcome.FAILURE, "❌"),
+])
+async def test_processing_emoji_from_profile_yaml(tmp_path, monkeypatch, outcome, final_emoji):
+    from agent.secret_scope import set_multiplex_active
+    from gateway.config import load_gateway_config
+    from gateway.run import _profile_runtime_scope
+
+    homes = [tmp_path / "a", tmp_path / "b"]
+    for home, setting in zip(homes, ['  processing_emoji: "🛠️"\n', '']):
+        home.mkdir()
+        (home / "config.yaml").write_text(
+            'discord:\n  enabled: true\n  token: "test-token"\n' + setting,
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("HERMES_HOME", str(homes[0]))
+    set_multiplex_active(True)
+    try:
+        for home, expected in [(homes[0], "🛠️"), (homes[1], "👀"), (homes[0], "🛠️")]:
+            with _profile_runtime_scope(home):
+                config = load_gateway_config().platforms[Platform.DISCORD]
+                adapter = DiscordAdapter(config)
+                adapter._client = SimpleNamespace(user=SimpleNamespace(id=99999))
+                calls = []
+
+                async def add(emoji):
+                    calls.append(("add", emoji))
+
+                async def remove(emoji, user):
+                    assert user is adapter._client.user
+                    calls.append(("remove", emoji))
+
+                event = _make_event("1", SimpleNamespace(add_reaction=add, remove_reaction=remove))
+                await adapter.on_processing_start(event)
+                await adapter.on_processing_complete(event, outcome)
+                assert calls == [("add", expected), ("remove", expected), ("add", final_emoji)]
+    finally:
+        set_multiplex_active(False)
