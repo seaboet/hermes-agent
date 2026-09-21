@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import yaml
 
@@ -22,6 +22,9 @@ from hermes_cli.config import load_config, save_config, get_env_value, save_env_
 from hermes_cli.cli_output import prompt as _prompt_input
 
 _MANIFEST_VERSION = 1
+
+if TYPE_CHECKING:
+    from hermes_platform.resolver.app import AppDef
 
 # Substituted at install time inside `transport.command` / `transport.args`.
 _INSTALL_DIR_VAR = "${INSTALL_DIR}"
@@ -100,7 +103,24 @@ class SuggestSpec:
     hosts: List[str] = field(default_factory=list)  # hostname suffixes ("atlassian.net")
     applications: List[str] = field(default_factory=list)  # reviewed local app labels/aliases
     examples: List[str] = field(default_factory=list)  # capability examples, not executable instructions
-    requires_app: bool = False  # local app prerequisite, unlike cloud services with desktop clients
+
+
+@dataclass
+class AppSpec:
+    """Where the application this MCP fronts lives, one ``AppDef`` per OS it is detectable on."""
+
+    per_os: Dict[str, "AppDef"] = field(default_factory=dict)
+
+    def for_os(self, os_family: str) -> Optional["AppDef"]:
+        return self.per_os.get(os_family)
+
+
+@dataclass
+class RequiresSpec:
+    """What the MCP needs before it is offered. Separate from ``app`` on purpose: one is data, one is policy."""
+
+    app: bool = False
+    min_version: Optional[str] = None
 
 
 @dataclass
@@ -114,7 +134,21 @@ class CatalogEntry:
     install: Optional[InstallSpec] = None
     post_install: str = ""
     suggest: Optional[SuggestSpec] = None
+    app: Optional[AppSpec] = None
+    requires: RequiresSpec = field(default_factory=RequiresSpec)
     manifest_path: Path = field(default_factory=Path)
+
+    # The slice ``hermes_platform.resolver.availability`` reads.
+    @property
+    def requires_app(self) -> bool:
+        return self.requires.app
+
+    @property
+    def min_version(self) -> Optional[str]:
+        return self.requires.min_version
+
+    def app_for(self, os_family: str) -> Optional["AppDef"]:
+        return self.app.for_os(os_family) if self.app else None
 
 
 class CatalogError(Exception):
@@ -236,8 +270,6 @@ def _parse_suggest(path: Path, suggest_raw: Any) -> Optional[SuggestSpec]:
     hosts_raw = suggest_raw.get("hosts") or []
     _require_str_list(path, "suggest.keywords", kw_raw, non_empty=True)
     _require_str_list(path, "suggest.hosts", hosts_raw, non_empty=True)
-    from hermes_cli.mcp_app_detection import validate_applications
-
     try:
         applications = validate_applications(suggest_raw.get("applications", []))
     except ValueError as exc:
@@ -246,16 +278,126 @@ def _parse_suggest(path: Path, suggest_raw: Any) -> Optional[SuggestSpec]:
     _require_str_list(path, "suggest.examples", examples, non_empty=True)
     if len(examples) > 6 or any(len(e) > 240 or not e.isprintable() for e in examples):
         raise CatalogError(f"{path}: suggest.examples allows at most 6 single-line examples of 240 characters")
-    requires_app = suggest_raw.get("requires_app", False)
-    if not isinstance(requires_app, bool) or (requires_app and not applications):
-        raise CatalogError(f"{path}: suggest.requires_app must be a boolean, with applications when true")
+    if "requires_app" in suggest_raw:
+        raise CatalogError(f"{path}: suggest.requires_app moved to top-level 'requires: {{app: true}}'")
     if not kw_raw and not hosts_raw and not applications:
         raise CatalogError(f"{path}: 'suggest' requires at least one keyword, host or application")
     # Matching is case-insensitive whole-word / host-suffix: store lowercase so UIs needn't re-normalize.
     return SuggestSpec(
         keywords=[k.strip().lower() for k in kw_raw],
         hosts=[h.strip().lower().lstrip(".") for h in hosts_raw],
-        applications=applications, examples=examples, requires_app=requires_app)
+        applications=applications, examples=examples)
+
+
+_MAX_APPLICATIONS = 16
+_APP_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._+-]{0,79}")
+_APP_OS_FAMILIES = ("win32", "darwin", "linux")
+_APP_PRESENCE = ("executable", "bundle")
+_APP_VERSION_KINDS = {"pe_resource": "win32", "uninstall_registry": "win32", "plist": "darwin", "none": None}
+_APP_LIVENESS_KINDS = ("server_json", "none")
+_VERSION_RE = re.compile(r"^\d+(\.\d+)*$")
+
+
+def validate_applications(labels: object) -> list[str]:
+    """Accept bounded display labels, never paths, commands or regexes."""
+    if not isinstance(labels, list) or len(labels) > _MAX_APPLICATIONS:
+        raise ValueError("suggest.applications must be a list of at most 16 app labels")
+    for label in labels:
+        if (not isinstance(label, str) or not _APP_LABEL.fullmatch(label)
+                or label != label.strip() or ".." in label or " --" in label):
+            raise ValueError("suggest.applications must contain safe app labels (1-80 characters)")
+    return list(labels)
+
+
+def _location_is_rooted(location: str, osf: str) -> bool:
+    if ".." in location.replace("\\", "/").split("/") or "://" in location:
+        return False
+    if location.startswith(("~", "%", "$")):
+        return True
+    if osf == "win32":
+        return bool(re.match(r"^[A-Za-z]:[\\/]", location))
+    return location.startswith("/")
+
+
+def _parse_app_os(path: Path, name: str, osf: str, raw: Any) -> "AppDef":
+    from hermes_platform.resolver.app import AppDef
+
+    _require_mapping(path, f"app.{osf}", raw)
+    presence = raw.get("presence")
+    if presence not in _APP_PRESENCE:
+        raise CatalogError(f"{path}: app.{osf}.presence must be one of {_APP_PRESENCE}")
+    location = raw.get("location")
+    if not isinstance(location, str) or not location.strip():
+        raise CatalogError(f"{path}: app.{osf}.location is required")
+    if not _location_is_rooted(location.strip(), osf):
+        raise CatalogError(
+            f"{path}: app.{osf}.location must be absolute or start with ~ / %VAR% / $VAR, without '..' or a URL scheme")
+    version = raw.get("version") or {"kind": "none"}
+    _require_mapping(path, f"app.{osf}.version", version)
+    vkind = version.get("kind", "none")
+    if vkind not in _APP_VERSION_KINDS:
+        raise CatalogError(f"{path}: app.{osf}.version.kind must be one of {sorted(_APP_VERSION_KINDS)}")
+    only_on = _APP_VERSION_KINDS[vkind]
+    if only_on and only_on != osf:
+        raise CatalogError(f"{path}: app.{osf}.version.kind {vkind!r} is only valid under app.{only_on}")
+    varg = str(version.get("display_name_prefix") or "")
+    if vkind == "uninstall_registry" and not varg:
+        raise CatalogError(f"{path}: app.{osf}.version.display_name_prefix is required for uninstall_registry")
+    liveness = raw.get("liveness") or {"kind": "none"}
+    _require_mapping(path, f"app.{osf}.liveness", liveness)
+    lkind = liveness.get("kind", "none")
+    if lkind not in _APP_LIVENESS_KINDS:
+        raise CatalogError(f"{path}: app.{osf}.liveness.kind must be one of {_APP_LIVENESS_KINDS}")
+    lpath = str(liveness.get("path") or "")
+    if lkind == "server_json" and not lpath:
+        raise CatalogError(f"{path}: app.{osf}.liveness.path is required for server_json")
+    return AppDef(
+        app_id=name, os_family=osf, presence=presence, location=location.strip(),
+        version_kind=vkind, version_arg=varg,
+        liveness_kind=lkind, liveness_path=lpath,
+        liveness_pid_key=str(liveness.get("pid_key") or "pid"),
+        liveness_url_key=str(liveness.get("url_key") or "http"),
+        liveness_token_key=str(liveness.get("token_key") or "token"),
+        endpoint_path=str(liveness.get("endpoint_path") or "/mcp"),
+    )
+
+
+def _parse_app(path: Path, name: str, raw: Any) -> Optional[AppSpec]:
+    if raw is None:
+        return None
+    _require_mapping(path, "app", raw)
+    unknown = set(raw) - set(_APP_OS_FAMILIES)
+    if unknown:
+        raise CatalogError(f"{path}: app has unknown OS keys {sorted(unknown)}; use {_APP_OS_FAMILIES}")
+    if not raw:
+        raise CatalogError(f"{path}: app needs at least one OS block")
+    return AppSpec(per_os={osf: _parse_app_os(path, name, osf, raw[osf]) for osf in raw})
+
+
+def _parse_requires(path: Path, raw: Any, app: Optional[AppSpec]) -> RequiresSpec:
+    if raw is None:
+        return RequiresSpec()
+    _require_mapping(path, "requires", raw)
+    unknown = set(raw) - {"app", "min_version"}
+    if unknown:
+        raise CatalogError(f"{path}: requires has unknown keys {sorted(unknown)}")
+    needs_app = raw.get("app", False)
+    if not isinstance(needs_app, bool):
+        raise CatalogError(f"{path}: requires.app must be a boolean")
+    if needs_app and app is None:
+        raise CatalogError(f"{path}: requires.app is true but the manifest has no 'app' block")
+    min_version = raw.get("min_version")
+    if min_version is not None:
+        if not isinstance(min_version, str) or not _VERSION_RE.match(min_version):
+            raise CatalogError(f"{path}: requires.min_version must be a dotted numeric string")
+        if not needs_app:
+            raise CatalogError(f"{path}: requires.min_version needs requires.app: true")
+        assert app is not None
+        unversioned = sorted(osf for osf, d in app.per_os.items() if d.version_kind == "none")
+        if unversioned:
+            raise CatalogError(
+                f"{path}: requires.min_version needs a version source under app.{unversioned[0]} (kind is none)")
+    return RequiresSpec(app=needs_app, min_version=min_version)
 
 
 def _parse_install(path: Path, install_raw: Any) -> Optional[InstallSpec]:
@@ -295,17 +437,59 @@ def _parse_manifest(path: Path) -> CatalogEntry:
     if not description:
         raise CatalogError(f"{path}: 'description' required")
 
-    # Validation order (transport, auth, tools, suggest, install) determines which error surfaces.
+    # Validation order (transport, auth, tools, suggest, install, app, requires) determines which error surfaces.
     transport = _parse_transport(path, data.get("transport"))
     auth = _parse_auth(path, data.get("auth"), name, transport.type == "http")
     tools = _parse_tools(path, data.get("tools"))
     suggest = _parse_suggest(path, data.get("suggest"))
     install = _parse_install(path, data.get("install"))
+    app = _parse_app(path, name, data.get("app"))
+    requires = _parse_requires(path, data.get("requires"), app)
     return CatalogEntry(
         name=name, description=description, source=str(data.get("source") or "").strip(),
         transport=transport, auth=auth, tools=tools, install=install,
-        post_install=str(data.get("post_install") or ""), suggest=suggest, manifest_path=path,
+        post_install=str(data.get("post_install") or ""), suggest=suggest,
+        app=app, requires=requires, manifest_path=path,
     )
+
+
+def catalog_entry_payload(entry: CatalogEntry, *, installed: bool, enabled: bool) -> Dict[str, Any]:
+    """The one wire projection of a catalog entry; RPC ``mcp.catalog`` is its only caller."""
+    from hermes_platform.resolver.availability import availability
+
+    transport, install, auth = entry.transport, entry.install, entry.auth
+    return {
+        "name": entry.name,
+        "description": entry.description,
+        "source": entry.source,
+        "transport": transport.type,
+        "auth_type": auth.type,
+        # ``requires`` (env key names) is what the bots dialogs read; ``required_env`` is the full
+        # prompt shape the connection card and the MCP tab read. Values never travel.
+        "requires": [e.name for e in auth.env],
+        "required_env": [
+            {"name": e.name, "prompt": e.prompt, "required": e.required, "secret": e.secret, "default": e.default}
+            for e in auth.env
+        ],
+        "command": transport.command,
+        "args": list(transport.args or []),
+        "url": transport.url,
+        "install_url": install.url if install else None,
+        "install_ref": install.ref if install else None,
+        "bootstrap": list(install.bootstrap) if install else [],
+        "default_enabled": list(entry.tools.default_enabled) if entry.tools.default_enabled is not None else None,
+        "post_install": entry.post_install or "",
+        "suggest": {
+            "keywords": list(entry.suggest.keywords), "hosts": list(entry.suggest.hosts),
+            "applications": list(entry.suggest.applications), "examples": list(entry.suggest.examples),
+        } if entry.suggest else None,
+        "requires_app": entry.requires.app,
+        "min_version": entry.requires.min_version,
+        "availability": availability(entry).as_dict(),
+        "needs_install": install is not None,
+        "installed": installed,
+        "enabled": enabled,
+    }
 
 
 # Populated by list_catalog(); inspected by the picker / catalog UIs so the user gets actionable
@@ -313,17 +497,40 @@ def _parse_manifest(path: Path) -> CatalogEntry:
 _CATALOG_DIAGNOSTICS: List[tuple] = []
 
 
+_CATALOG_CACHE: "tuple[tuple, List[CatalogEntry], List[tuple]] | None" = None
+
+
+def _catalog_signature(root: Path) -> tuple:
+    """(root, (name, mtime_ns, size) per manifest): the catalog changes only when a file does."""
+    sig = []
+    for child in sorted(root.iterdir()):
+        manifest = child / "manifest.yaml"
+        try:
+            st = manifest.stat()
+        except OSError:
+            continue
+        sig.append((child.name, st.st_mtime_ns, st.st_size))
+    return (str(root), tuple(sig))
+
+
 def list_catalog() -> List[CatalogEntry]:
     """Return all valid catalog entries, sorted by name.
 
     Invalid manifests are skipped silently (CI catches them); future ``manifest_version`` ones are
     skipped too but surfaced via :func:`catalog_diagnostics` so UIs can say "update Hermes".
+    Parsed entries are reused until a manifest's mtime or size changes: the registry's per-server
+    ``check_fn`` and the catalog RPC both call this on hot paths.
     """
+    global _CATALOG_CACHE
     root = _catalog_root()
     if not root.exists():
         return []
+    sig = _catalog_signature(root)
+    if _CATALOG_CACHE is not None and _CATALOG_CACHE[0] == sig:
+        _CATALOG_DIAGNOSTICS[:] = _CATALOG_CACHE[2]
+        return list(_CATALOG_CACHE[1])
     entries: List[CatalogEntry] = []
-    _CATALOG_DIAGNOSTICS.clear()
+    diagnostics: List[tuple] = []
     for child in sorted(root.iterdir()):
         manifest = child / "manifest.yaml"
         if not manifest.is_file():
@@ -333,8 +540,11 @@ def list_catalog() -> List[CatalogEntry]:
         except CatalogError as exc:
             msg = str(exc)
             future = "manifest_version" in msg and "unsupported" in msg
-            _CATALOG_DIAGNOSTICS.append((child.name, "future_manifest" if future else "invalid", msg))
-    return entries
+            diagnostics.append((child.name, "future_manifest" if future else "invalid", msg))
+    _CATALOG_DIAGNOSTICS[:] = diagnostics
+    _CATALOG_CACHE = (sig, entries, diagnostics)
+    return list(entries)
+
 
 
 def catalog_diagnostics() -> List[tuple]:
