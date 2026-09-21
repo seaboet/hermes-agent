@@ -208,6 +208,27 @@ def skill_matches_environment(frontmatter: Dict[str, Any]) -> bool:
     return any(_detect_environment(tag) for tag in tags if tag)
 
 
+def skill_matches_apps(frontmatter: Dict[str, Any]) -> bool:
+    """True when every catalog app named in ``requires_apps:`` is present on this host (absent = all).
+
+    Names are MCP catalog entry names whose manifest has an ``app`` block; the check is the same
+    ``availability()`` the catalog uses. Offer-time filter, like ``environments:``.
+    """
+    names = frontmatter.get("requires_apps")
+    if not names:
+        return True
+    from hermes_cli.mcp_catalog import get_entry
+    from hermes_platform.resolver.availability import availability
+
+    for name in names if isinstance(names, list) else [names]:
+        entry = get_entry(str(name).strip())
+        if entry is None or entry.app is None:
+            return False
+        if availability(entry).state not in ("available", "no_requirements"):
+            return False
+    return True
+
+
 _RAW_CONFIG_CACHE: Dict[Tuple[str, int, int, int, int], Dict[str, Any]] = {}
 
 
