@@ -1240,21 +1240,18 @@ def _(rid, params: dict) -> dict:
 # desktop plugin can manage MCP servers for ANY profile. Persistence: hermes_cli/mcp_config.py.
 @_scoped_rpc("mcp.catalog")
 def _(rid, params: dict) -> dict:
-    """``{servers: [{name, description, installed, enabled, requires: [env keys], transport}]}`` per profile."""
+    """Every catalog entry with per-profile installed/enabled state and this host's availability."""
     mcp_catalog = _tools_mod("hermes_cli.mcp_catalog")
-    out = []
+    servers, diagnostics = [], []
     for entry in mcp_catalog.list_catalog():
         try:
-            requires = [str(k) for k in (getattr(entry, "env_keys", None) or [])]
-        except Exception:
-            requires = []
-        transport = getattr(entry, "transport", None)  # TransportSpec → its kind string
-        out.append({
-            "name": entry.name, "description": getattr(entry, "description", "") or "",
-            "installed": bool(mcp_catalog.is_installed(entry.name)),
-            "enabled": bool(mcp_catalog.is_enabled(entry.name)), "requires": requires,
-            "transport": str(getattr(transport, "kind", "") or transport or "stdio")})
-    return _ok(rid, {"servers": out})
+            servers.append(mcp_catalog.catalog_entry_payload(
+                entry, installed=bool(mcp_catalog.is_installed(entry.name)),
+                enabled=bool(mcp_catalog.is_enabled(entry.name))))
+        except Exception as exc:  # one entry's host probe must not remove the other 64 from the list
+            diagnostics.append({"name": entry.name, "kind": "availability_error", "message": f"{type(exc).__name__}: {exc}"})
+    diagnostics += [{"name": n, "kind": k, "message": m} for (n, k, m) in mcp_catalog.catalog_diagnostics()]
+    return _ok(rid, {"servers": servers, "diagnostics": diagnostics})
 
 
 @_mcp_rpc("list", required=())

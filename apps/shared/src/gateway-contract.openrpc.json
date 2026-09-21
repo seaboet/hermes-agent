@@ -1376,7 +1376,7 @@
     },
     {
       "name": "mcp.catalog",
-      "summary": "Curated MCP presets with per-profile installed/enabled state and the env keys each needs.",
+      "summary": "Every curated MCP manifest with per-profile installed/enabled state and this host's availability.",
       "params": [
         {
           "name": "params",
@@ -13979,8 +13979,84 @@
         "title": "LoopSnapshot",
         "type": "object"
       },
+      "McpCatalogAvailability": {
+        "additionalProperties": false,
+        "description": "``hermes_platform.resolver.availability.Availability`` for this backend host.",
+        "properties": {
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "min_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Version"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "McpCatalogAvailability",
+        "type": "object"
+      },
+      "McpCatalogDiagnostic": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "message"
+        ],
+        "title": "McpCatalogDiagnostic",
+        "type": "object"
+      },
       "McpCatalogEntry": {
         "additionalProperties": false,
+        "description": "``hermes_cli.mcp_catalog.catalog_entry_payload`` \u2014 the one projection of a manifest.",
         "properties": {
           "name": {
             "title": "Name",
@@ -13990,13 +14066,17 @@
             "title": "Description",
             "type": "string"
           },
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
+          "source": {
+            "title": "Source",
+            "type": "string"
           },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          },
+          "auth_type": {
+            "title": "Auth Type",
+            "type": "string"
           },
           "requires": {
             "items": {
@@ -14005,20 +14085,189 @@
             "title": "Requires",
             "type": "array"
           },
-          "transport": {
-            "title": "Transport",
+          "required_env": {
+            "items": {
+              "$ref": "#/components/schemas/McpCatalogEnvField"
+            },
+            "title": "Required Env",
+            "type": "array"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Command"
+          },
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Args",
+            "type": "array"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "install_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install Url"
+          },
+          "install_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install Ref"
+          },
+          "bootstrap": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bootstrap",
+            "type": "array"
+          },
+          "default_enabled": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Default Enabled"
+          },
+          "post_install": {
+            "title": "Post Install",
             "type": "string"
+          },
+          "suggest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpCatalogSuggest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "requires_app": {
+            "title": "Requires App",
+            "type": "boolean"
+          },
+          "min_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Version"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/McpCatalogAvailability"
+          },
+          "needs_install": {
+            "title": "Needs Install",
+            "type": "boolean"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "name",
           "description",
-          "installed",
-          "enabled",
+          "source",
+          "transport",
+          "auth_type",
           "requires",
-          "transport"
+          "required_env",
+          "args",
+          "bootstrap",
+          "post_install",
+          "requires_app",
+          "availability",
+          "needs_install",
+          "installed",
+          "enabled"
         ],
         "title": "McpCatalogEntry",
+        "type": "object"
+      },
+      "McpCatalogEnvField": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "default": {
+            "type": "string",
+            "title": "Default"
+          }
+        },
+        "required": [
+          "name",
+          "prompt",
+          "required",
+          "secret",
+          "default"
+        ],
+        "title": "McpCatalogEnvField",
         "type": "object"
       },
       "McpCatalogResult": {
@@ -14030,12 +14279,61 @@
             },
             "title": "Servers",
             "type": "array"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/McpCatalogDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
           }
         },
         "required": [
-          "servers"
+          "servers",
+          "diagnostics"
         ],
         "title": "McpCatalogResult",
+        "type": "object"
+      },
+      "McpCatalogSuggest": {
+        "additionalProperties": false,
+        "properties": {
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "applications": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applications",
+            "type": "array"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keywords",
+          "hosts",
+          "applications",
+          "examples"
+        ],
+        "title": "McpCatalogSuggest",
         "type": "object"
       },
       "McpOauthCallbackParams": {

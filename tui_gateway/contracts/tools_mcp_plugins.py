@@ -338,21 +338,70 @@ method("learning.edit", params=LearningEditParams, result=LearningMutationResult
 # ── MCP catalog + per-profile server lifecycle ────────────────────────────────────────────────
 
 
+class McpCatalogEnvField(Result):
+    name: str
+    prompt: str
+    required: bool
+    secret: bool
+    default: str
+
+
+class McpCatalogSuggest(Result):
+    keywords: list[str]
+    hosts: list[str]
+    applications: list[str]
+    examples: list[str]
+
+
+class McpCatalogAvailability(Result):
+    """``hermes_platform.resolver.availability.Availability`` for this backend host."""
+
+    state: str
+    version: str | None = None
+    path: str | None = None
+    min_version: str | None = None
+
+
 class McpCatalogEntry(Result):
+    """``hermes_cli.mcp_catalog.catalog_entry_payload`` — the one projection of a manifest."""
+
     name: str
     description: str
+    source: str
+    transport: str
+    auth_type: str
+    requires: list[str]
+    required_env: list[McpCatalogEnvField]
+    command: str | None = None
+    args: list[str]
+    url: str | None = None
+    install_url: str | None = None
+    install_ref: str | None = None
+    bootstrap: list[str]
+    default_enabled: list[str] | None = None
+    post_install: str
+    suggest: McpCatalogSuggest | None = None
+    requires_app: bool
+    min_version: str | None = None
+    availability: McpCatalogAvailability
+    needs_install: bool
     installed: bool
     enabled: bool
-    requires: list[str]
-    transport: str
+
+
+class McpCatalogDiagnostic(Result):
+    name: str
+    kind: str
+    message: str
 
 
 class McpCatalogResult(Result):
     servers: list[McpCatalogEntry]
+    diagnostics: list[McpCatalogDiagnostic]
 
 
 method("mcp.catalog", params=ProfileParams, result=McpCatalogResult,
-       doc="Curated MCP presets with per-profile installed/enabled state and the env keys each needs.")
+       doc="Every curated MCP manifest with per-profile installed/enabled state and this host's availability.")
 
 
 class McpServerSummary(Result):

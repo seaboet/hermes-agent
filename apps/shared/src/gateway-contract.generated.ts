@@ -3532,14 +3532,57 @@ export interface LearningEditParams {
 }
 export interface McpCatalogResult {
   servers: McpCatalogEntry[]
+  diagnostics: McpCatalogDiagnostic[]
 }
+/** ``hermes_cli.mcp_catalog.catalog_entry_payload`` — the one projection of a manifest. */
 export interface McpCatalogEntry {
   name: string
   description: string
+  source: string
+  transport: string
+  auth_type: string
+  requires: string[]
+  required_env: McpCatalogEnvField[]
+  command?: string | null
+  args: string[]
+  url?: string | null
+  install_url?: string | null
+  install_ref?: string | null
+  bootstrap: string[]
+  default_enabled?: string[] | null
+  post_install: string
+  suggest?: McpCatalogSuggest | null
+  requires_app: boolean
+  min_version?: string | null
+  availability: McpCatalogAvailability
+  needs_install: boolean
   installed: boolean
   enabled: boolean
-  requires: string[]
-  transport: string
+}
+export interface McpCatalogEnvField {
+  name: string
+  prompt: string
+  required: boolean
+  secret: boolean
+  default: string
+}
+export interface McpCatalogSuggest {
+  keywords: string[]
+  hosts: string[]
+  applications: string[]
+  examples: string[]
+}
+/** ``hermes_platform.resolver.availability.Availability`` for this backend host. */
+export interface McpCatalogAvailability {
+  state: string
+  version?: string | null
+  path?: string | null
+  min_version?: string | null
+}
+export interface McpCatalogDiagnostic {
+  name: string
+  kind: string
+  message: string
 }
 export interface McpServersListResult {
   servers: McpServerSummary[]
@@ -4365,7 +4408,7 @@ export interface RpcMethods {
   'learning.frames': { params: LearningFramesParams; result: LearningFramesResult }
   /** Stateless one-shot LLM completion (titles, ideas) on the session's or the task backend. */
   'llm.oneshot': { params: LlmOneshotParams; result: LlmOneshotResult }
-  /** Curated MCP presets with per-profile installed/enabled state and the env keys each needs. */
+  /** Every curated MCP manifest with per-profile installed/enabled state and this host's availability. */
   'mcp.catalog': { params: ProfileParams; result: McpCatalogResult }
   /** Add a server to the profile's config from a catalog preset and/or an explicit config. */
   'mcp.servers.add': { params: McpServersAddParams; result: McpServersAddResult }
