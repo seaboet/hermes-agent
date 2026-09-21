@@ -145,8 +145,7 @@ class TestManifestParsing:
         assert sg.hosts == ["atlassian.net", "atlassian.com"]
 
     def test_suggest_onboarding_metadata_is_additive(self, catalog_dir):
-        from hermes_cli.mcp_catalog import _build_server_config, _parse_manifest
-        from hermes_cli.web_routers.mcp import _catalog_entry_json
+        from hermes_cli.mcp_catalog import _build_server_config, _parse_manifest, catalog_entry_payload
 
         triggers = {"keywords": ["Demo "], "hosts": [".Example.com"]}
         path = _write_manifest(catalog_dir, "demo", _basic_manifest(suggest=triggers))
@@ -161,28 +160,37 @@ class TestManifestParsing:
         assert entry.suggest.keywords == legacy.suggest.keywords == ["demo"]
         assert entry.suggest.hosts == legacy.suggest.hosts == ["example.com"]
         assert legacy.suggest.applications == legacy.suggest.examples == []
-        assert _catalog_entry_json(entry, False, False)["suggest"] == {
+        assert catalog_entry_payload(entry, installed=False, enabled=False)["suggest"] == {
             "keywords": ["demo"], "hosts": ["example.com"],
             "applications": enriched["applications"], "examples": enriched["examples"],
-            "requires_app": False,
         }
         assert _build_server_config(entry, None) == _build_server_config(legacy, None)
         _write_manifest(catalog_dir, "demo", _basic_manifest(suggest={"applications": ["Blender"]}))
         assert _parse_manifest(path).suggest.applications == ["Blender"]
 
     def test_suggest_discovery_metadata_is_bounded_data(self, catalog_dir):
-        from hermes_cli.mcp_catalog import CatalogError, _parse_manifest
-        from hermes_cli.web_routers.mcp import _catalog_entry_json
+        from hermes_cli.mcp_catalog import CatalogError, _parse_manifest, catalog_entry_payload
 
         def parse(**metadata):
             path = _write_manifest(catalog_dir, "demo", _basic_manifest(
                 suggest={"keywords": ["demo"], **metadata}))
             return _parse_manifest(path)
 
-        entry = parse(applications=["Blender"], requires_app=True)
-        assert entry.suggest is not None and entry.suggest.requires_app is True
-        assert _catalog_entry_json(entry, False, False)["suggest"]["requires_app"] is True
-        assert parse().suggest.requires_app is False
+        path = _write_manifest(catalog_dir, "demo", _basic_manifest(
+            suggest={"keywords": ["demo"], "applications": ["Blender"]},
+            app={"darwin": {
+                "presence": "bundle",
+                "location": "/Applications/Blender.app",
+                "version": {"kind": "plist"},
+            }},
+            requires={"app": True},
+        ))
+        entry = _parse_manifest(path)
+        assert entry.suggest is not None and entry.requires_app is True
+        payload = catalog_entry_payload(entry, installed=False, enabled=False)
+        assert payload["requires_app"] is True
+        assert "requires_app" not in payload["suggest"]
+        assert parse().requires_app is False
         for metadata in (
             {"applications": "Blender"}, {"applications": [None]}, {"applications": ["/Applications/Blender.app"]},
             {"applications": ["../blender"]}, {"applications": ["C:\\Blender"]}, {"applications": [".*"]},
