@@ -667,13 +667,51 @@ _make_get_prompt_handler = _make_utility_handler(
 
 
 def _make_check_fn(server_name: str):
-    """Connection-alive check; lazy (schema-cache registered) servers count as available."""
+    """Connection-alive check; lazy (schema-cache registered) servers count as available.
+
+    When the server came from a catalog manifest that gates on an application (`requires.app`),
+    the application must also be present on this host, or the tools are not offered even while a
+    stale connection lingers. Returns a plain bool: the registry caches ``bool(fn())``.
+    """
     from tools.mcp_tool_scope import _resolve_server_key
 
-    def _check() -> bool:
+    def _connected() -> bool:
         with _core._lock:
             key = _resolve_server_key(server_name)
             server = _core._servers.get(key)
             return ((server is not None and (server.session is not None or server._is_recycled_stdio()))
                     or key in _core._lazy_server_configs)
+
+    def _check() -> bool:
+        if not _connected():
+            return False
+        return _catalog_app_offerable(server_name)
     return _check
+
+
+def _catalog_app_offerable(server_name: str) -> bool:
+    """True unless a catalog manifest with the same transport endpoint requires an application this host lacks.
+
+    Matching is on the endpoint (http url or stdio command), not the server name: a user's own server that
+    happens to share a manifest's name keeps its tools.
+    """
+    try:
+        from hermes_cli.mcp_catalog import get_entry
+        from hermes_platform.resolver.availability import availability
+    except ImportError:
+        return True
+    entry = get_entry(server_name)
+    if entry is None or not entry.requires_app:
+        return True
+    from hermes_cli.mcp_config import _get_mcp_servers
+
+    config = _get_mcp_servers().get(server_name) or {}
+    if not _same_endpoint(config, entry.transport):
+        return True
+    return availability(entry).offerable
+
+
+def _same_endpoint(config: dict, transport) -> bool:
+    if transport.type == "http":
+        return bool(transport.url) and str(config.get("url") or "").rstrip("/") == transport.url.rstrip("/")
+    return bool(transport.command) and str(config.get("command") or "") == transport.command
