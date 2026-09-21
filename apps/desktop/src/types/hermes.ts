@@ -1,4 +1,4 @@
-import type { ConnectionRequestPayload } from '@hermes/shared'
+import type { ConnectionRequestPayload, McpCatalogEntry } from '@hermes/shared'
 
 export interface ConfigFieldSchema {
   category?: string
@@ -1649,43 +1649,13 @@ export interface McpServerTestResponse {
   tools: { name: string; description: string }[]
 }
 
-/** One Nous-approved MCP catalog entry from `GET /api/mcp/catalog`. */
-export interface McpCatalogEntry {
-  name: string
-  description: string
-  source: string
-  transport: string
-  auth_type: string
-  required_env: { name: string; prompt: string; required: boolean }[]
-  command: string | null
-  args: string[]
-  url: string | null
-  install_url: string | null
-  install_ref: string | null
-  bootstrap: string[]
-  default_enabled: string[] | null
-  post_install: string
-  /** Composer-suggestion triggers (present when the manifest declares a
-   *  `suggest` block; null/absent on entries without one and on older
-   *  backends that predate the field). */
-  suggest?: {
-    keywords: string[]
-    hosts: string[]
-    applications?: string[]
-    examples?: string[]
-    requires_app?: boolean
-  } | null
-  /** Observed on this entry's backend host, not proof that its MCP is usable. */
-  detected_apps?: string[]
-  needs_install: boolean
-  installed: boolean
-  enabled: boolean
-}
+/** The catalog entry is the gateway contract's shape (`mcp.catalog`); `entries` keeps the
+ *  name this app's callers use for the RPC's `servers` list. */
+export type { McpCatalogAvailability, McpCatalogEntry } from '@hermes/shared'
 
 export interface McpCatalogResponse {
   entries: McpCatalogEntry[]
   diagnostics: { name: string; kind: string; message: string }[]
-  discovery?: { scope: 'backend'; status: 'ok' | 'unavailable'; platform: string }
 }
 
 /** `GET /api/memory` — active provider + built-in memory file sizes. */

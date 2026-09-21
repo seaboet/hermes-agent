@@ -5,7 +5,7 @@ import { type OnboardingInterests, onboardingRecommendations } from '@/lib/onboa
 /** A bounded, read-only seed snapshot. No global cache and no connection authority. */
 export async function readOnboardingCapabilities(scope?: ProfileScope, interests?: OnboardingInterests): Promise<string> {
   try {
-    const catalog = await getMcpCatalog(scope, true)
+    const catalog = await getMcpCatalog(scope)
     const recommendations = onboardingRecommendations(catalog.entries, interests)
 
     if (!recommendations.length) {

@@ -1,4 +1,4 @@
-import type { McpCatalogEntry } from '@/types/hermes'
+import type { McpCatalogAvailability, McpCatalogEntry } from '@/types/hermes'
 
 export interface OnboardingInterests {
   apps?: readonly string[]
@@ -9,7 +9,7 @@ export interface OnboardingRecommendation {
   name: string
   description: string
   examples: string[]
-  detectedApps: string[]
+  availability: McpCatalogAvailability
   readiness: 'configured_unverified' | 'setup_required'
   requiresApp: boolean
   authType: string
@@ -17,6 +17,9 @@ export interface OnboardingRecommendation {
 }
 
 const words = (text: string): string => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ')
+
+/** The backend saw the application this entry needs (present, version acceptable). */
+const appDetected = (entry: McpCatalogEntry): boolean => entry.availability.state === 'available'
 
 /** Rank evidence, not a fixed list of products. The model derives outcomes from catalog descriptions; curated examples are optional. */
 export function onboardingRecommendations(
@@ -32,7 +35,7 @@ export function onboardingRecommendations(
     const terms = [entry.name, ...(entry.suggest?.keywords ?? []), ...(entry.suggest?.applications ?? [])].map(words).filter(Boolean)
     const preferred = terms.some(term => selected.has(term))
     const topical = terms.some(term => subject.includes(` ${term} `))
-    const detectedApps = entry.detected_apps ?? []
+    const detected = appDetected(entry)
     const configured = entry.installed && entry.enabled
 
     // An explicit task can request a disabled integration; mere discovery must not undo that choice.
@@ -40,11 +43,13 @@ export function onboardingRecommendations(
       return []
     }
 
-    if (entry.suggest?.requires_app && !detectedApps.length && !entry.installed) {
+    // The app this MCP fronts is absent, too old, or this OS is unsupported: nothing to recommend,
+    // even when the MCP itself is configured (the user may have uninstalled the app since).
+    if (entry.requires_app && !detected) {
       return []
     }
 
-    if (!configured && !detectedApps.length && !preferred && !topical) {
+    if (!configured && !detected && !preferred && !topical) {
       return []
     }
 
@@ -52,14 +57,14 @@ export function onboardingRecommendations(
       name: entry.name,
       description: entry.description,
       examples: examples.slice(0, preferred || topical ? 3 : 1),
-      detectedApps,
+      availability: entry.availability,
       readiness: configured ? 'configured_unverified' : 'setup_required',
-      requiresApp: entry.suggest?.requires_app === true,
+      requiresApp: entry.requires_app,
       authType: entry.auth_type,
       setupAction: !entry.installed ? 'install' : !entry.enabled ? 'enable' : null
     }
 
-    return [{ recommendation, topical, preferred, configured, detected: detectedApps.length > 0 }]
+    return [{ recommendation, topical, preferred, configured, detected }]
   })
 
   return candidates.sort((a, b) =>

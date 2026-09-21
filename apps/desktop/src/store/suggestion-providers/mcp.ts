@@ -80,11 +80,11 @@ async function loadSuggestible(): Promise<SuggestibleServer[]> {
 
 /** This older composer path runs hosted OAuth. Local/setup-dependent tasks use manage_connections instead. */
 export function buildMcpSuggestionIndex(
-  entries: readonly Pick<McpCatalogEntry, 'name' | 'url' | 'suggest' | 'auth_type' | 'transport'>[]
+  entries: readonly Pick<McpCatalogEntry, 'name' | 'url' | 'suggest' | 'auth_type' | 'transport' | 'requires_app'>[]
 ): SuggestibleServer[] {
   return entries
     .filter(entry =>
-      entry.transport === 'http' && entry.auth_type === 'oauth' && !entry.suggest?.requires_app
+      entry.transport === 'http' && entry.auth_type === 'oauth' && !entry.requires_app
       && entry.suggest && entry.url && (entry.suggest.keywords.length > 0 || entry.suggest.hosts.length > 0)
     )
     .map(entry => ({

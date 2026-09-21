@@ -1,6 +1,8 @@
+import type { McpCatalogResult } from '@hermes/shared'
+
 import type { McpCatalogResponse, McpServerSummary } from '@/types/hermes'
 
-import { capabilityScoped, hermesApi, type ProfileScope, profileScoped } from './client'
+import { capabilityScoped, getApiRequestConnection, getApiRequestProfile, hermesApi, type ProfileScope, profileScoped } from './client'
 
 export interface McpTestResult {
   ok: boolean
@@ -114,12 +116,23 @@ export function setMcpServerEnabled(name: string, enabled: boolean): Promise<{ o
   })
 }
 
-export function getMcpCatalog(profile?: ProfileScope, detectApps = false): Promise<McpCatalogResponse> {
-  return window.hermesDesktop.api<McpCatalogResponse>({
-    ...capabilityScoped(profile),
-    path: `/api/mcp/catalog${detectApps ? '?detect_apps=true' : ''}`,
-    ...(detectApps ? { timeoutMs: 5000 } : {})
+/** The catalog is a gateway RPC (`mcp.catalog`), the one reader the TUI, the bots
+ *  dialogs and this app share. Scope maps as `capabilityScoped` did for REST:
+ *  `undefined` is the ambient (connection, profile) pair; `null` is the ambient
+ *  connection with no profile pin (its active profile); a string pins a profile
+ *  on the ambient connection; an object pins only the halves it names and the
+ *  ambient value fills the rest. */
+export async function getMcpCatalog(scope?: ProfileScope): Promise<McpCatalogResponse> {
+  const { activeGatewayProfileKey, requestGatewayForAgent } = await import('@/store/gateway')
+  const pin = capabilityScoped(scope)
+  const connectionId = pin.connectionId ?? getApiRequestConnection()
+  const profile = pin.profile ?? (scope === null ? activeGatewayProfileKey() : getApiRequestProfile() ?? activeGatewayProfileKey())
+
+  const result = await requestGatewayForAgent<McpCatalogResult>(connectionId, profile, 'mcp.catalog', {}, undefined, undefined, {
+    spawnPriority: pin.priority === 'foreground' ? 'foreground' : 'background'
   })
+
+  return { diagnostics: result.diagnostics, entries: result.servers }
 }
 
 export function installMcpCatalogEntry(
