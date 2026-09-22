@@ -18,6 +18,7 @@ def _telegram_event(
     *, attachment=False, forwarded=False, quoted=False, replied=False,
     automatic_forward=False, external_reply=False, reply_to_story=False,
     reply_to_checklist_task_id=None, reply_to_poll_option_id=None, bot_author=False,
+    pinned_message=None,
 ):
     from plugins.platforms.telegram.adapter import TelegramAdapter
 
@@ -40,6 +41,7 @@ def _telegram_event(
         reply_to_story=SimpleNamespace() if reply_to_story else None,
         reply_to_checklist_task_id=reply_to_checklist_task_id,
         reply_to_poll_option_id=reply_to_poll_option_id,
+        pinned_message=pinned_message,
         entities=[],
         date=None,
     )
@@ -231,6 +233,35 @@ def test_telegram_raw_reply_reference_markers_make_text_non_isolated(marker):
     assert envelope["reply_or_reference"] == "yes"
     assert envelope["current_text_isolated"] == "no"
     assert "current text" not in repr(envelope)
+
+
+def test_telegram_pinned_message_is_a_reply_reference_marker():
+    envelope = build_turn_source_envelope(_telegram_event(pinned_message=object()))
+
+    assert envelope["reply_or_reference"] == "yes"
+    assert envelope["current_text_isolated"] == "no"
+
+
+@pytest.mark.parametrize("unavailable", ("missing", "raising"))
+def test_unavailable_telegram_pinned_message_remains_unknown(unavailable):
+    event = _telegram_event()
+    if unavailable == "missing":
+        del event.raw_message.pinned_message
+    else:
+        raw_message = event.raw_message
+
+        class RaisingPinnedMessage:
+            def __getattr__(self, name):
+                if name == "pinned_message":
+                    raise RuntimeError("unavailable")
+                return getattr(raw_message, name)
+
+        event.raw_message = RaisingPinnedMessage()
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope["reply_or_reference"] == "unknown"
+    assert envelope["current_text_isolated"] == "unknown"
 
 
 def test_telegram_automatic_forward_marker_makes_text_non_isolated():

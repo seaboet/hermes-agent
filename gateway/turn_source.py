@@ -9,9 +9,12 @@ from gateway.platforms.event import MessageType
 
 def _telegram_raw_fact(event, name: str, *, boolean: bool = False) -> str:
     raw_message = getattr(event, "raw_message", None)
-    if raw_message is None or not hasattr(raw_message, name):
+    if raw_message is None:
         return "unknown"
-    value = getattr(raw_message, name)
+    try:
+        value = getattr(raw_message, name)
+    except Exception:
+        return "unknown"
     if boolean:
         return "yes" if value else "no"
     return "yes" if value is not None else "no"
@@ -67,6 +70,7 @@ def build_turn_source_envelope(event) -> Mapping[str, object]:
         _telegram_raw_fact(event, "reply_to_story"),
         _telegram_raw_fact(event, "reply_to_checklist_task_id"),
         _telegram_raw_fact(event, "reply_to_poll_option_id"),
+        _telegram_raw_fact(event, "pinned_message"),
     )
     current_text_isolated = (
         "yes" if plain_text_only == "yes" and forwarded == quoted == reply_or_reference == "no"
