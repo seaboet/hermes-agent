@@ -14,7 +14,11 @@ from gateway.turn_source import build_turn_source_envelope
 from hermes_cli.plugins import PluginManager
 
 
-def _telegram_event(*, attachment=False, forwarded=False, quoted=False, replied=False):
+def _telegram_event(
+    *, attachment=False, forwarded=False, quoted=False, replied=False,
+    automatic_forward=False, external_reply=False, reply_to_story=False,
+    reply_to_checklist_task_id=None, reply_to_poll_option_id=None, bot_author=False,
+):
     from plugins.platforms.telegram.adapter import TelegramAdapter
 
     reply_to_message = (
@@ -23,14 +27,19 @@ def _telegram_event(*, attachment=False, forwarded=False, quoted=False, replied=
     )
     raw_message = SimpleNamespace(
         chat=SimpleNamespace(id="chat-1", type="private", title=None, full_name="User One"),
-        from_user=SimpleNamespace(id="user-1", full_name="User One", is_bot=False),
+        from_user=SimpleNamespace(id="user-1", full_name="User One", is_bot=bot_author),
         text="current text",
         message_id=56,
         message_thread_id=None,
         is_topic_message=False,
         reply_to_message=reply_to_message,
         forward_origin=SimpleNamespace() if forwarded else None,
+        is_automatic_forward=automatic_forward,
         quote=SimpleNamespace(text="selected text") if quoted else None,
+        external_reply=SimpleNamespace() if external_reply else None,
+        reply_to_story=SimpleNamespace() if reply_to_story else None,
+        reply_to_checklist_task_id=reply_to_checklist_task_id,
+        reply_to_poll_option_id=reply_to_poll_option_id,
         entities=[],
         date=None,
     )
@@ -177,14 +186,14 @@ def test_telegram_unavailable_raw_facts_remain_unknown():
     assert envelope["current_text_isolated"] == "unknown"
 
 
-def test_telegram_unavailable_human_source_fact_remains_unknown():
+def test_telegram_unavailable_human_source_fact_does_not_change_content_isolation():
     event = _telegram_event()
     event.source = SimpleNamespace(platform=Platform.TELEGRAM, user_id="user-1")
 
     envelope = build_turn_source_envelope(event)
 
     assert envelope["human_user_message"] == "unknown"
-    assert envelope["current_text_isolated"] == "unknown"
+    assert envelope["current_text_isolated"] == "yes"
 
 
 def test_known_unsafe_fact_makes_text_non_isolated_despite_unknown_fact():
@@ -204,6 +213,71 @@ def test_safe_authoritative_telegram_facts_make_text_isolated():
     assert envelope["plain_text_only"] == "yes"
     assert envelope["forwarded"] == envelope["quoted"] == envelope["reply_or_reference"] == "no"
     assert envelope["current_text_isolated"] == "yes"
+
+
+@pytest.mark.parametrize("marker", (
+    "external_reply",
+    "reply_to_story",
+    "reply_to_checklist_task_id",
+    "reply_to_poll_option_id",
+))
+def test_telegram_raw_reply_reference_markers_make_text_non_isolated(marker):
+    value = "option-1" if marker == "reply_to_poll_option_id" else 1
+    if marker in {"external_reply", "reply_to_story"}:
+        value = True
+
+    envelope = build_turn_source_envelope(_telegram_event(**{marker: value}))
+
+    assert envelope["reply_or_reference"] == "yes"
+    assert envelope["current_text_isolated"] == "no"
+    assert "current text" not in repr(envelope)
+
+
+def test_telegram_automatic_forward_marker_makes_text_non_isolated():
+    envelope = build_turn_source_envelope(_telegram_event(automatic_forward=True))
+
+    assert envelope["forwarded"] == "yes"
+    assert envelope["current_text_isolated"] == "no"
+
+
+def test_telegram_bot_author_is_not_human_but_safe_text_remains_isolated():
+    envelope = build_turn_source_envelope(_telegram_event(bot_author=True))
+
+    assert envelope["human_user_message"] == "no"
+    assert envelope["current_text_isolated"] == "yes"
+
+
+def test_unavailable_telegram_source_context_remains_unknown():
+    event = _telegram_event()
+    del event.raw_message.forward_origin
+    del event.raw_message.is_automatic_forward
+    del event.raw_message.quote
+    del event.raw_message.external_reply
+    del event.raw_message.reply_to_story
+    del event.raw_message.reply_to_checklist_task_id
+    del event.raw_message.reply_to_poll_option_id
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope["forwarded"] == "unknown"
+    assert envelope["quoted"] == "unknown"
+    assert envelope["reply_or_reference"] == "unknown"
+    assert envelope["current_text_isolated"] == "unknown"
+
+
+def test_known_unsafe_telegram_marker_dominates_unavailable_context():
+    event = _telegram_event(external_reply=True)
+    del event.raw_message.forward_origin
+    del event.raw_message.is_automatic_forward
+    del event.raw_message.quote
+    del event.raw_message.reply_to_story
+    del event.raw_message.reply_to_checklist_task_id
+    del event.raw_message.reply_to_poll_option_id
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope["reply_or_reference"] == "yes"
+    assert envelope["current_text_isolated"] == "no"
 
 
 def test_narrow_pre_llm_hook_ignores_additive_turn_source_envelope(monkeypatch):
