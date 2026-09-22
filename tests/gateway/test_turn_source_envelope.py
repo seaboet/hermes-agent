@@ -68,6 +68,19 @@ def _agent(envelope=None):
     return agent
 
 
+class _RaisingDescriptorProxy:
+    def __init__(self, target, *raising_names):
+        self._target = target
+        self._raising_names = set(raising_names)
+        self.accesses = {}
+
+    def __getattr__(self, name):
+        self.accesses[name] = self.accesses.get(name, 0) + 1
+        if name in self._raising_names:
+            raise RuntimeError(f"{name} unavailable")
+        return getattr(self._target, name)
+
+
 def _fire_pre_llm(agent, monkeypatch):
     captured = []
 
@@ -308,6 +321,90 @@ def test_known_unsafe_telegram_marker_dominates_unavailable_context():
     envelope = build_turn_source_envelope(event)
 
     assert envelope["reply_or_reference"] == "yes"
+    assert envelope["current_text_isolated"] == "no"
+
+
+@pytest.mark.parametrize(("field", "affected_fact"), (
+    ("forward_origin", "forwarded"),
+    ("is_automatic_forward", "forwarded"),
+    ("quote", "quoted"),
+    ("reply_to_message", "reply_or_reference"),
+    ("external_reply", "reply_or_reference"),
+    ("reply_to_story", "reply_or_reference"),
+    ("reply_to_checklist_task_id", "reply_or_reference"),
+    ("reply_to_poll_option_id", "reply_or_reference"),
+    ("pinned_message", "reply_or_reference"),
+))
+def test_raising_telegram_raw_descriptor_yields_unknown_once(field, affected_fact):
+    event = _telegram_event()
+    raw_message = _RaisingDescriptorProxy(event.raw_message, field)
+    event.raw_message = raw_message
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope[affected_fact] == "unknown"
+    assert envelope["current_text_isolated"] == "unknown"
+    assert raw_message.accesses[field] == 1
+
+
+@pytest.mark.parametrize(("field", "affected_fact", "isolated"), (
+    ("reply_to_message_id", "reply_or_reference", "unknown"),
+    ("raw_message", "forwarded", "unknown"),
+    ("source", "platform", "unknown"),
+    ("internal", "human_user_message", "yes"),
+    ("message_type", "plain_text_only", "unknown"),
+    ("media_urls", "plain_text_only", "unknown"),
+))
+def test_raising_event_descriptor_yields_fail_closed_envelope_once(field, affected_fact, isolated):
+    event = _telegram_event()
+    raising_event = _RaisingDescriptorProxy(event, field)
+
+    envelope = build_turn_source_envelope(raising_event)
+
+    assert envelope[affected_fact] == "unknown"
+    assert envelope["current_text_isolated"] == isolated
+    assert raising_event.accesses[field] == 1
+
+
+@pytest.mark.parametrize("field", ("platform", "value"))
+def test_raising_source_platform_descriptor_returns_unknown_envelope_once(field):
+    event = _telegram_event()
+    if field == "platform":
+        source = _RaisingDescriptorProxy(event.source, "platform")
+    else:
+        platform = _RaisingDescriptorProxy(event.source.platform, "value")
+        source = _RaisingDescriptorProxy(event.source)
+        source._target.platform = platform
+    event.source = source
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope["platform"] == "unknown"
+    assert envelope["current_text_isolated"] == "unknown"
+    assert (source if field == "platform" else source.platform).accesses[field] == 1
+
+
+@pytest.mark.parametrize("field", ("is_bot", "user_id"))
+def test_raising_human_source_descriptor_yields_unknown_identity_once(field):
+    event = _telegram_event()
+    source = _RaisingDescriptorProxy(event.source, field)
+    event.source = source
+
+    envelope = build_turn_source_envelope(event)
+
+    assert envelope["human_user_message"] == "unknown"
+    assert envelope["current_text_isolated"] == "yes"
+    assert source.accesses[field] == 1
+
+
+def test_known_unsafe_raw_fact_dominates_raising_event_descriptor():
+    event = _telegram_event(forwarded=True)
+    raising_event = _RaisingDescriptorProxy(event, "message_type")
+
+    envelope = build_turn_source_envelope(raising_event)
+
+    assert envelope["forwarded"] == "yes"
+    assert envelope["plain_text_only"] == "unknown"
     assert envelope["current_text_isolated"] == "no"
 
 
