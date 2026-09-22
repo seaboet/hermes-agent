@@ -1699,6 +1699,10 @@ class TurnRunner:
         try:
             api_message = _wrap_current_message_with_observed_context(self._native_image_run_message(), observed_group_context)
             kwargs = {"conversation_history": agent_history, "task_id": ctx.session_id}
+            from agent.turn_source import unknown_turn_source_envelope
+            _missing = object()
+            _previous_envelope = getattr(agent, "_turn_source_envelope", _missing)
+            agent._turn_source_envelope = ctx.turn_source_envelope or unknown_turn_source_envelope()
             if _accepts_keyword(agent.run_conversation, "turn_author"):
                 # Sent on every transport: a provider gating durable writes needs the bot flag in a DM too.
                 kwargs["turn_author"] = {"id": ctx.source.user_id or None, "name": ctx.source.user_name or None,
@@ -1725,6 +1729,11 @@ class TurnRunner:
             with notification_turn(agent, muted=ctx.mute_notification_reply, session_id=ctx.session_id or ""):
                 return agent.run_conversation(api_message, **kwargs)
         finally:
+            if "_previous_envelope" in locals():
+                if _previous_envelope is _missing:
+                    delattr(agent, "_turn_source_envelope")
+                else:
+                    agent._turn_source_envelope = _previous_envelope
             unregister_gateway_notify(session_key)
             # Cancel pending clarify entries so blocked agent threads don't hang past the end of the
             # run (interrupt, completion, gateway shutdown). Idempotent.
