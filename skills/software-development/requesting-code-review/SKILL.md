@@ -16,7 +16,8 @@ metadata:
 Automated verification pipeline before code lands. Static scans, baseline-aware
 quality gates, an independent reviewer subagent, and an auto-fix loop.
 
-**Core principle:** No agent should verify its own work. Fresh context finds what you miss.
+**Core principle:** An independent review needs a distinct reviewer. An implementer's
+self-check (including one-shot verification) must never be reported as independent approval.
 
 ## When to Use
 
@@ -24,6 +25,11 @@ quality gates, an independent reviewer subagent, and an auto-fix loop.
 - When user says "commit", "push", "ship", "done", "verify", or "review before merge"
 - After completing a task with 2+ file edits in a git repo
 - After each task in subagent-driven-development (the two-stage review)
+
+This is an **implementer-owned pre-commit workflow**, not the operating procedure
+for an assigned independent review card. A reviewer on such a card reports evidence
+and a verdict only: do not edit, auto-fix, stage, or commit the deliverable. Follow
+the card's review contract for its lifecycle transition.
 
 **Skip for:** documentation-only changes, pure config tweaks, or when user says "skip verification".
 
@@ -127,7 +133,8 @@ Quick scan before dispatching the reviewer:
 **Interactive sessions only.** In a one-shot run (`hermes chat -q`, `--oneshot`, a
 benchmark harness) there is no one to hand the verdict to and a fresh subagent re-pays
 the whole system prompt plus a repo re-read: skip Steps 5 and 7, apply the Step 4
-checklist to the diff yourself, run the tests, and go to Step 8.
+checklist to the diff yourself, run the tests, and go to Step 8. Record the result
+as an implementer self-check, **not** an independent review.
 
 Call `delegate_task` directly — it is NOT available inside execute_code or scripts.
 
@@ -182,7 +189,7 @@ Return ONLY this JSON:
 
 Combine results from Steps 2, 3, and 5.
 
-**All passed:** Proceed to Step 8 (commit).
+**All passed:** Proceed to Step 8 (authorized handoff or commit).
 
 **Any failures:** Report what failed, then proceed to Step 7 (auto-fix).
 
@@ -230,15 +237,28 @@ After the fix agent completes, re-run Steps 1-6 (full verification cycle).
 - Failed after 2 attempts: escalate to user with the remaining issues and
   suggest `git stash` or `git reset` to undo
 
-## Step 8 — Commit
+## Step 8 — Handoff or authorized commit
 
-If verification passed:
+Report the verification evidence and verdict. Verification alone does not grant
+permission to commit. Only an implementer with explicit user or task-contract
+authorization to commit may do so, after inspecting the exact intended paths and
+excluding unrelated changes. An independent reviewer never commits here.
+
+If an implementer is authorized to commit, stage only the named deliverable
+paths after the self-check. A later independent review card may verify that
+commit; its verdict is not a prerequisite unless the task contract says so.
 
 ```bash
-git add -A && git commit -m "[verified] <description>"
+git add -- <explicit-deliverable-paths>
+git diff --cached --check
+git diff --cached --name-only  # confirm every staged path is authorized
+git diff --cached --stat
+git commit -m "<description>"
 ```
 
-The `[verified]` prefix indicates an independent reviewer approved this change.
+Use the `[verified]` prefix only when an independent reviewer actually approved
+the exact changes being committed. Never use it for one-shot self-checks or when
+independent review was skipped. A review verdict is evidence, not commit authority.
 
 ## Reference: Common Patterns to Flag
 
