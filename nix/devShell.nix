@@ -8,7 +8,7 @@
 { ... }:
 {
   perSystem =
-    { pkgs, self', ... }:
+    { pkgs, lib, self', ... }:
     let
       packages = builtins.attrValues self'.packages;
       hermesNpmLib = self'.packages.default.passthru.hermesNpmLib;
@@ -27,8 +27,10 @@
             mkdir -p $out/bin
             install -Dm755 ${../hermes} $out/bin/hermes
           '')
-          self'.packages.sandbox
           uv
+        ]
+        ++ lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+          self'.packages.sandbox
           # Headless Wayland compositor for E2E tests (test:e2e:visual).
           # cage renders a single client with no window management, so
           # the Electron window opens at a fixed size without tiling.
@@ -40,7 +42,7 @@
           # live compositor; grim runs inside that isolated client session.
           ghostty
           grim
-        ]
+        ])
         ++ self'.packages.default.passthru.devDeps;
         shellHook = ''
           ${hermesAgentDevShellHook}
@@ -57,7 +59,7 @@
           export VIRTUAL_ENV="$(dirname "$(dirname "$(readlink -f "$(command -v python)")")")"
 
           echo "Hermes Agent dev shell in $HERMES_PYTHON_SRC_ROOT"
-          echo "Ready. Run 'hermes' or 'sandbox hermes' to start."
+          echo "Ready. Run 'hermes'${lib.optionalString pkgs.stdenv.isLinux " or 'sandbox hermes'"} to start."
         '';
       };
     };

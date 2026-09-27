@@ -10,8 +10,6 @@
     }:
     let
 
-      sandbox = pkgs.callPackage ./sandbox.nix { };
-
       minimal = pkgs.callPackage ./hermes-agent.nix {
         inherit (inputs) uv2nix pyproject-nix pyproject-build-systems;
         npm-lockfile-fix = inputs'.npm-lockfile-fix.packages.default;
@@ -54,8 +52,6 @@
           }).node-gyp;
         default = full;
 
-        inherit sandbox;
-
         inherit minimal;
 
         # Ships discord.py + python-telegram-bot + slack-sdk so a plain
@@ -70,6 +66,8 @@
         desktop = full.hermesDesktop;
 
         update-npm-lockfile = full.hermesNpmLib.updateNpmLockfile;
+      } // lib.optionalAttrs pkgs.stdenv.isLinux {
+        sandbox = pkgs.callPackage ./sandbox.nix { };
       };
     };
 }
