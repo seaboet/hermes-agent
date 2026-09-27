@@ -1,11 +1,11 @@
 # Project Context Files
 
-Hermes injects project-level instructions into the system prompt by reading context files from the working directory. The discovery order is **first match wins** — only one project context source is loaded per session.
+Hermes injects project-level instructions into the system prompt by reading context files from the working directory. The discovery order is **first non-empty context type wins** — one type is loaded per session, but that type may contribute more than one file.
 
 | File (in priority order) | Discovery | Use when |
 |---|---|---|
-| `.hermes.md` / `HERMES.md` | Walks parents up to the git root, stops at git root | You want hierarchical project rules (root + per-package overrides) |
-| `AGENTS.md` / `agents.md` | **Cwd only** — subdirectory and parent copies are ignored | You want portable agent instructions that work the same in Hermes, Claude Code, Codex, etc. |
+| `.hermes.md` / `HERMES.md` | Nearest non-empty match walking parents up to the git root | You want Hermes-specific project rules |
+| `AGENTS.override.md` / `AGENTS.md` / `agents.md` | In a Git repo, merge the git-root-to-cwd directory chain; outside a repo, cwd only. First non-empty name wins per directory. | You want portable project instructions, with optional local overrides |
 | `CLAUDE.md` / `claude.md` | Cwd only | Same as AGENTS.md, Claude-flavored |
 | `.cursorrules` / `.cursor/rules/*.mdc` | Cwd only | Migrating from Cursor |
 
@@ -14,12 +14,12 @@ Hermes injects project-level instructions into the system prompt by reading cont
 ### Pick the right one
 
 - **Use `.hermes.md`** when you want Hermes-specific behavior that lives above the cwd (root + subtree), or when you want rules to inherit from a parent directory. The parent walk stops at the git root, so a home-level `.hermes.md` won't leak into every project (a git repo's root is the boundary).
-- **Use `AGENTS.md`** when the same project will also be worked on by other agents (Codex, Claude Code, OpenCode). Those tools all have their own conventions for `AGENTS.md`, and the "cwd only" contract keeps the file portable.
+- **Use `AGENTS.md`** when the same project will also be worked on by other agents (Codex, Claude Code, OpenCode). In a Git repository, Hermes merges files from the git root through the working directory; deeper files take precedence. A non-empty `AGENTS.override.md` wins over `AGENTS.md` in the same directory. Other tools may discover these files differently. Hermes also discovers nested context when tools access subdirectories during the session.
 - **Don't put project rules in `~/.hermes/AGENTS.md`** (or any other home-level location). When Hermes runs with that directory as cwd, the file loads — but only for that one directory. For cross-project context, use `SOUL.md` (in `$HERMES_HOME`, identity-only) or install a skill via `hermes skills install`.
 
 ### Size and truncation
 
-Each context file is capped at 20,000 characters. Files longer than that get **head + tail** truncated (the middle is dropped, with a `[...truncated...]` marker). For large project rules, prefer splitting into multiple skills over cramming one file.
+At startup, `context_file_max_chars` takes precedence when configured; otherwise the limit scales with the model context window, from 20,000 to 500,000 characters. Oversized files are head/tail truncated. Progressively discovered subdirectory hints have a separate per-file ceiling in `agent/subdirectory_hints.py`, not the startup limit. Keep rules concise and move reusable procedures into skills.
 
 ### Security
 
