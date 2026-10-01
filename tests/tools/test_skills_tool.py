@@ -304,6 +304,16 @@ class TestSkillsList:
         assert filtered["count"] == 1
         assert filtered["skills"][0]["name"] == "skill-a"
 
+    def test_category_filter_includes_root_skill(self, tmp_path):
+        with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
+            _make_skill(tmp_path, "ebalance")
+            _make_skill(tmp_path, "ebalance-theme-authoring", category="ebalance")
+            filtered = json.loads(skills_list(category="ebalance"))
+
+        assert [skill["name"] for skill in filtered["skills"]] == [
+            "ebalance", "ebalance-theme-authoring",
+        ]
+
     def test_category_filter_finds_symlinked_category(self, tmp_path):
         external_root = tmp_path / "repo"
         skills_root = tmp_path / "skills"
