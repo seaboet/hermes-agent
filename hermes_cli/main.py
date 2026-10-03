@@ -402,6 +402,7 @@ from hermes_cli.subcommands.pets import build_pets_parser
 from hermes_cli.subcommands.journey import build_journey_parser
 from hermes_cli.subcommands.computer_use import build_computer_use_parser
 from hermes_cli.subcommands.sessions import build_sessions_parser
+from hermes_cli.subcommands.queue import build_queue_parser
 from hermes_cli.subcommands.completion import build_completion_parser
 
 
@@ -2892,7 +2893,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "journey", "memory-graph", "learning",
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
         "project", "proxy",
-        "prompt-size",
+        "prompt-size", "queue",
         "resume",
         "send", "sessions", "setup",
         "skin", "skills", "slack", "status", "sync", "tools", "uninstall", "update",
@@ -3527,6 +3528,7 @@ def _build_cli_parser():
     build_computer_use_parser(subparsers)
     build_mcp_parser(subparsers, cmd_mcp=cmd_mcp)
     build_sessions_parser(subparsers, cmd_sessions=_cmd_sessions_lazy)
+    build_queue_parser(subparsers)
     build_insights_parser(subparsers, cmd_insights=cmd_insights)
     build_usage_parser(subparsers)
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)

@@ -61,6 +61,7 @@ The install also ships `hermes-agent`, a minimal runner that sends one query and
 | `hermes auth` | Manage credentials — add, list, remove, reset, status, logout. Handles OAuth flows for Codex/Nous/Anthropic. |
 | `hermes login` / `logout` | **Deprecated** — use `hermes auth` instead. |
 | `hermes send` | Send a one-shot message to a configured messaging platform (Telegram, Discord, Slack, Signal, SMS, …). Useful from shell scripts, cron jobs, CI hooks, and monitoring daemons — no agent loop, no LLM. |
+| `hermes queue` | Submit a queued prompt to an existing local live TUI/Desktop session. |
 | `hermes peer` | Register peer Hermes gateways on other machines and DM their agents' canonical Bot Chats (`hermes peer dm <peer>[/<agent>] "…"`). The transport behind cross-machine bot-to-bot messaging. |
 | `hermes secrets` | Manage external secret sources (currently Bitwarden Secrets Manager) for pulling API keys at process startup instead of from `~/.hermes/.env`. |
 | `hermes migrate` | Diagnose and (optionally) rewrite `config.yaml` to replace references to retired models or deprecated settings (e.g. `migrate xai`). |
@@ -1742,6 +1743,34 @@ hermes pets <list|install|select|show|off|scale|remove|doctor>
 | `doctor` | Check pet setup + terminal graphics support. |
 
 You can also generate a brand-new pet from a text description with the `/hatch` slash command. See [Pets](../user-guide/features/pets.md).
+
+## `hermes queue`
+
+```bash
+hermes queue --session <DURABLE_ID_OR_LIVE_ID_OR_EXACT_NAME> --message "Review the latest implementation."
+hermes -p developer queue --session 1f508780 --message "Run verification."
+```
+
+Both options are required (`-s` and `-m` are their short forms). Resolution in the
+selected profile checks an exact durable session ID first, then an exact live/UI
+session ID (the ID shown in the TUI), then a unique exact title/name. A live/UI ID
+resolves to its active owner's durable session ID; multiple matching owners are
+ambiguous and require retrying with a durable ID. IDs and names never use prefix
+or fuzzy matching. Offline sessions have no live/UI ID and can only be addressed
+by durable ID or title; they fail with an explicit resume instruction. The command
+never resumes a session or takes its lease.
+
+A busy session finishes its current turn before running the prompt, regardless of
+its `/busy` mode. An idle live session may start immediately. Exit status 0 means
+the owner accepted the prompt, not that its turn finished. If acceptance cannot be
+confirmed, check the owning session before retrying.
+
+TUI and Desktop/serve owners expose a local loopback attachment endpoint and
+advertise it with their existing active-session lease. The handshake checks the
+stored session ID, lease and profile before returning the authenticated WebSocket
+endpoint. A new draft must have started its first turn to hold a live lease. Other
+owner types without attachment support fail explicitly. Restart older TUI/Desktop
+backends to enable attachment.
 
 ## `hermes sessions`
 

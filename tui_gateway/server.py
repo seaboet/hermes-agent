@@ -716,9 +716,7 @@ def unregister_live_transport(transport: Transport | None) -> None:
 
 
 def _broadcast_global_event(event: str, payload: dict | None = None) -> None:
-    """Fan a session-less, surface-global event (``skin.changed``) to every connected client — background
-    emitters bottom out at stdio in ``write_json``'s ladder. No registered transports → ``_emit`` when stdout is the
-    stdio TUI's JSON-RPC channel, else dropped (nobody is listening; stdout is a log sink)."""
+    """Fan a surface-global event to every WS peer and the real TUI stdio client."""
     with _live_transports_lock:
         targets = list(_live_transports)
     if not targets:
@@ -726,6 +724,8 @@ def _broadcast_global_event(event: str, payload: dict | None = None) -> None:
             return _emit(event, "", payload)
         logger.debug("global-event broadcast dropped (no connected client) type=%s", event)
         return None
+    if _stdio_is_rpc_channel and _stdio_transport not in targets:
+        targets.append(_stdio_transport)
     frame = _event_frame(event, "", payload)
     for transport in targets:
         try:

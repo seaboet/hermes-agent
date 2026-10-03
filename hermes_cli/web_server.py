@@ -178,6 +178,9 @@ _DESKTOP_MCP_DISCOVERY_DELAY_S = 1.0
 
 @asynccontextmanager
 async def _lifespan(app: "FastAPI"):
+    from tui_gateway.shared_runtime import start_shared_runtime, stop_shared_runtime
+
+    start_shared_runtime()
     app.state.event_channels = {}  # dict[str, set]
     app.state.event_lock = asyncio.Lock()
     app.state.pty_active_session_files = {}  # dict[str, Path]
@@ -306,6 +309,7 @@ async def _lifespan(app: "FastAPI"):
     try:
         yield
     finally:
+        stop_shared_runtime()
         try:
             tui_gateway.server.clear_tui_message_injector()
         except Exception:
