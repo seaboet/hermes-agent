@@ -274,7 +274,8 @@ export async function runRewindSubmit(
   recovery?: { storedSessionId?: null | string; onSessionRecovered?: (sessionId: string) => void },
   truncateRowId?: number,
   sourceText?: string,
-  rebindRowIds?: readonly number[]
+  rebindRowIds?: readonly number[],
+  clientMessageId?: string
 ): Promise<SurvivorUserRowIds | undefined> {
   // Recovery may rebind the live id mid-flight; interrupt/submit must both
   // follow it rather than pinning the dead one.
@@ -339,6 +340,7 @@ export async function runRewindSubmit(
       {
         session_id: targetId,
         text,
+        ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
         ...truncateSubmitParams(resolvedOrdinal, resolvedMessageId, resolvedRowId),
         // A first-turn rewind resolves to an empty transcript, which the
         // gateway additionally gates behind confirm_empty_truncate. In
@@ -415,6 +417,21 @@ export function finalizeUserInterruptedMessages(
   )
 
   return finalizeInterruptedMessages(marked, streamId, occurredAt)
+}
+
+/** Stop finalize: the live reply is also flagged `interrupted` so it reads as cut short. */
+export function finalizeStoppedMessages(
+  messages: ChatMessage[],
+  streamId?: null | string,
+  occurredAt = Date.now() / 1000
+): ChatMessage[] {
+  const flagged = messages.map(message =>
+    message.role === 'assistant' && (message.pending || message.id === streamId)
+      ? { ...message, interrupted: true }
+      : message
+  )
+
+  return finalizeUserInterruptedMessages(flagged, streamId, occurredAt)
 }
 
 /**

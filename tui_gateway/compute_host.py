@@ -258,6 +258,9 @@ class ComputeHost:
                 hermes_undo.on_user_message_appended(session["session_key"])
             with contextlib.suppress(Exception):
                 server._persist_branch_seed(session)
+            server._persist_submit_user_row(
+                session, text, frame.get("display_kind"), accept_metadata=frame.get("display_metadata"))
+            server._emit_submit_user_row(sid, session)
             server._run_prompt_submit(
                 request_id, sid, session, text, display_kind=frame.get("display_kind") or None,
                 display_metadata=(frame.get("display_metadata")
@@ -436,7 +439,8 @@ class ComputeHost:
             else:
                 ack = self._control_ack(server, frame, session)
                 if "error" in ack:
-                    self._reply("control.error", sid, request_id, message=ack["error"])
+                    self._reply("control.error", sid, request_id, message=ack["error"],
+                                **({"code": c} if (c := ack.get("code")) else {}))
                 else:
                     self._reply("control.ack", sid, request_id, route_name=route_name, **ack)
 
@@ -468,14 +472,19 @@ class ComputeHost:
             response = server._methods[route_name](frame.get("request_id"), params)
             if "error" in response:
                 failure = _CONTROL_FAILURES[route_name]
-                return {"error": str(response["error"].get("message") or failure)}
+                return {"error": str(response["error"].get("message") or failure), "code": response["error"].get("code")}
             ack = {"result": response.get("result") or {}}
             if route_name == "session.save":
                 return ack
             with session["history_lock"]:
                 ack.update(_history_meta(session))
         else:
-            output = server._mirror_slash_side_effects(sid, session, command) if command else ""
+            if route_name == "slash.refine":
+                parts = command.lstrip("/").split(maxsplit=1)
+                focus = parts[1] if len(parts) > 1 else ""
+                output = server._live_slash_command_output(sid, session, "refine", focus) or ""
+            else:
+                output = server._mirror_slash_side_effects(sid, session, command) if command else ""
             with session["history_lock"]:
                 messages = server._history_to_messages(list(session.get("history") or []), profile_home=session.get("profile_home"))
                 ack = {"output": output, **_history_meta(session), "messages": messages}

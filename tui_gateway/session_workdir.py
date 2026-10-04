@@ -220,9 +220,43 @@ def _persisted_session_cwd(session: dict) -> str | None:
     """The cwd to stamp on the session's DB row, or None to leave it unset (launch-dir rule: ``_ensure_session_db_row``)."""
     if session.get("explicit_cwd"):
         return _session_cwd(session)
-    if _session_source(session) in _LAUNCH_CWD_NOT_A_WORKSPACE:
+    if _session_source(session) in _LAUNCH_CWD_NOT_A_WORKSPACE or _is_remote_launch_cwd(session):
         return None
     return str(session.get("cwd") or "") or None  # the session's OWN dir, never _session_cwd's gateway-wide fallback
+
+
+def _is_remote_launch_cwd(session: dict | None) -> bool:
+    """An ssh session's cwd that nobody picked: the gateway's launch directory, a path on THIS host. Host-side context
+    discovery reads it from memory, but it is never persisted: a resume adopts a stored ssh cwd as the remote
+    workspace."""
+    return bool(session) and not session.get("explicit_cwd") and _cwd_is_remote(session.get("profile_home"))
+
+
+def _is_hermes_owned_cwd(cwd: str, profile_home) -> bool:
+    """Whether ``cwd`` is inside Hermes's own host tree: the Hermes root (``/opt/data`` and its ``/opt/data/home``
+    subprocess home in the Docker image, which also holds every named profile) or the install tree
+    (``/opt/hermes``). A ``~`` path is the remote's home, never this host's."""
+    from agent.runtime_cwd import _is_install_tree
+    from hermes_constants import get_default_hermes_root
+
+    if not os.path.isabs(cwd):
+        return False
+    try:
+        path = Path(cwd).resolve()
+        home = Path(profile_home or get_hermes_home()).expanduser()
+        roots = {home.resolve(), get_default_hermes_root(home=home).resolve()}
+    except (OSError, RuntimeError):
+        return False
+    return any(path == root or root in path.parents for root in roots) or _is_install_tree(path)
+
+
+def _resumable_stored_cwd(cwd, profile_home) -> str:
+    """A session row's stored cwd as a resume may adopt it: empty when an ssh session's row holds a path in Hermes's
+    own host tree (a host launch directory, never a remote workspace)."""
+    cwd = str(cwd or "")
+    if cwd and _cwd_is_remote(profile_home) and _is_hermes_owned_cwd(cwd, profile_home):
+        return ""
+    return cwd
 
 
 def _heal_dead_cwd(cwd: str) -> str:
@@ -573,7 +607,7 @@ def _submit_row_owner_key(staged: dict, session: dict) -> str:
 
 
 def _write_submit_user_row(session: dict, text: Any, display_kind: str | None,
-                           accept_metadata: dict | None = None) -> dict | None:
+                           accept_metadata: dict | None = None, message_uid: str | None = None) -> dict | None:
     """Write the submitted user turn to the transcript and RETURN the durable dict (stamped
     ``_DB_PERSISTED_MARKER``/``_row_id``) WITHOUT slotting it on the session. The write half of
     :func:`_persist_submit_user_row`, shared by the busy-queue accept (which attaches the dict to
@@ -589,6 +623,8 @@ def _write_submit_user_row(session: dict, text: Any, display_kind: str | None,
     from agent.context_compressor import _DB_PERSISTED_MARKER
     from agent.message_metadata import stamp_message_timestamp, stamp_message_uid
     staged = stamp_message_timestamp({"role": "user", "content": text})
+    if message_uid:
+        staged["message_uid"] = message_uid
     if display_kind:
         staged["display_kind"] = display_kind
     if accept_metadata:
@@ -613,7 +649,7 @@ def _write_submit_user_row(session: dict, text: Any, display_kind: str | None,
 
 
 def _persist_submit_user_row(session: dict, text: Any, display_kind: str | None,
-                             accept_metadata: dict | None = None) -> None:
+                             accept_metadata: dict | None = None, message_uid: str | None = None) -> None:
     """Write the submitted user turn at send time, before the agent build and turn: the agent's own
     crash persist only runs once the build finished, so quitting a frozen app during a slow first build
     left a session row with no message (#111868). The dict is staged on the session already stamped
@@ -622,8 +658,20 @@ def _persist_submit_user_row(session: dict, text: Any, display_kind: str | None,
     the turn's crash persist then writes the row as before. ``accept_metadata`` marks a row that
     belongs to a still-QUEUED envelope (#125577); a dispatching turn's row is never marked."""
     session.pop("_submit_user_row", None)  # a failed/unsupported write must not acknowledge an older send
-    if (staged := _write_submit_user_row(session, text, display_kind, accept_metadata)) is not None:
+    if (staged := _write_submit_user_row(session, text, display_kind, accept_metadata, message_uid)) is not None:
         session["_submit_user_row"] = staged
+
+
+def _emit_submit_user_row(sid: str, session: dict) -> None:
+    """Publish the row the turn will adopt; synthesized / hidden inputs have no user bubble."""
+    staged = session.get("_submit_user_row")
+    if not isinstance(staged, dict) or staged.get("display_kind") == "hidden":
+        return
+    messages = _history_to_messages([staged], profile_home=session.get("profile_home"))
+    if messages:
+        _emit("message.user", sid, {
+            "message": messages[0],
+            "client_message_ids": (staged.get("display_metadata") or {}).get("client_message_ids", [])})
 
 
 def _adopt_submit_user_row(session: dict, agent, persist_user_message: Any, text: Any) -> None:

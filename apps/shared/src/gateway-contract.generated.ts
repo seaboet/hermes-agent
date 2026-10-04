@@ -786,6 +786,7 @@ export interface ModelOptionProvider {
 /** ``hermes_cli/inventory.py::_apply_capabilities``. */
 export interface ModelCapabilities {
   fast: boolean
+  ultrafast?: boolean
   reasoning: boolean
   can_disable_reasoning?: boolean | null
 }
@@ -1891,10 +1892,11 @@ export interface ProfilesListParams {
   profile?: string | null
   include_sessions?: boolean | string | null
 }
-/** ``bot_mode_protocol`` tells clients this backend injects the teammate protocol itself. */
+/** ``bot_mode_protocol`` tells clients this backend injects the teammate protocol itself; ``install_id`` (as on ``/api/status``) names the machine that answered. */
 export interface ProfilesListResult {
   profiles?: ProfileRow[]
   bot_mode_protocol?: boolean
+  install_id?: string
 }
 /** One roster row; the session fields are present only with ``include_sessions``. */
 export interface ProfileRow {
@@ -2611,6 +2613,7 @@ export interface PromptSubmitParams {
   session_id: string
   profile?: string | null
   text?: unknown
+  client_message_id?: string | null
   display_kind?: string | null
   interrupted?: boolean | null
   queued?: boolean | null
@@ -2944,10 +2947,12 @@ export interface SessionCreateParams {
   provider?: string | null
   reasoning_effort?: string | null
   fast?: boolean | null
+  service_tier?: string | null
   close_on_disconnect?: boolean
   hidden?: boolean
   room_plumbing?: boolean
   follow_profile_config?: boolean
+  idempotency_key?: string | null
 }
 /** One create-time transcript row (``session_history._coerce_seed_history``); ``text`` is the legacy alias of ``content``; only ``display_kind: "hidden"`` is accepted from the wire. Clients forward stored rows verbatim (``_row_id``, ``timestamp``, …) and the coercer drops what it does not use, so the row stays open. */
 export interface SeedMessage {
@@ -2972,6 +2977,7 @@ export interface TranscriptMessage {
   tool_call_id?: string | null
   timestamp?: number | null
   row_id?: number | null
+  message_uid?: string | null
   display_kind?: string | null
   display_metadata?: unknown | null
   name?: string | null
@@ -2999,6 +3005,7 @@ export interface SessionBranchStoredParams {
   cols?: number | null
   source?: string | null
   cwd?: string | null
+  idempotency_key?: string | null
 }
 export interface SessionBranchStoredResult {
   session_id: string
@@ -3262,6 +3269,7 @@ export interface SessionBranchParams {
   profile?: string | null
   name?: string | null
   count?: number | null
+  idempotency_key?: string | null
 }
 export interface SessionBranchResult {
   session_id: string
@@ -3276,6 +3284,7 @@ export interface SessionBranchWholeParams {
   session_id: string
   profile?: string | null
   name?: string | null
+  idempotency_key?: string | null
 }
 export interface SessionBranchWholeResult {
   session_id: string
@@ -3643,6 +3652,7 @@ export interface CommandsCatalogResult {
 export interface CommandCatalogMeta {
   argument_mode?: ArgumentMode | null
   desktop?: string | null
+  desktop_subcommands?: string[] | null
 }
 export type ArgumentMode = 'options' | 'text' | 'mixed'
 export interface CommandCategory {
@@ -3815,7 +3825,7 @@ export interface CronJobRow {
   last_run_at?: string | null
   last_status?: string | null
   last_delivery_error?: string | null
-  last_delivery_unverified?: boolean | null
+  last_delivery_unverified?: string[] | null
   last_fire_error?: string | null
   last_error?: string | null
   enabled?: boolean
@@ -3843,14 +3853,16 @@ export interface CronRemovedJob {
 export interface BrowserManageParams {
   action?: BrowserAction
   url?: string | null
+  enabled?: boolean | null
   session_id?: string | null
   profile?: string | null
 }
-export type BrowserAction = 'status' | 'connect' | 'disconnect'
+export type BrowserAction = 'status' | 'connect' | 'disconnect' | 'use'
 export interface BrowserManageResult {
   connected: boolean
   url?: string | null
   messages?: string[] | null
+  browser_use?: boolean | null
 }
 /** Handlers that look a live session up with ``_sessions.get(params.get("session_id"))``: an absent / unknown id falls back to the launch profile's config, so it is never required. */
 export interface _SessionScoped {
@@ -4274,7 +4286,7 @@ export interface PluginServerRow {
   state: PluginServerState
   sentence: string
 }
-export type PluginServerState = 'connected' | 'app_not_running' | 'hermes_not_connected' | 'endpoint_unavailable' | 'no_interactive_session' | 'version_too_old' | 'missing_app' | 'unknown'
+export type PluginServerState = 'connected' | 'app_not_running' | 'hermes_not_connected' | 'endpoint_unavailable' | 'no_interactive_session' | 'version_too_old' | 'missing_app' | 'unsupported_gpu' | 'unknown'
 /** One ``config_schema`` key of a plugin manifest, rendered by the Plugins hub (``hermes_cli.plugins_settings.plugin_settings_fields``). ``secret`` fields carry no value: ``env`` names the ``.env`` variable and ``has_value`` whether it is set. */
 export interface PluginSettingField {
   key: string
@@ -4532,6 +4544,11 @@ export interface ErrorPayload {
 /** ``tui_gateway/model_switch.py`` capability-refresh notice. */
 export interface NoticePayload {
   message: string
+}
+/** Canonical submitted user row at dispatch, shared by all attached clients. */
+export interface MessageUserPayload {
+  message: TranscriptMessage
+  client_message_ids?: string[]
 }
 /** ``prompt_turn._invoke_agent._stream`` (message.delta: ``text`` + optional ``rendered``), ``agent_callbacks._agent_cbs`` (reasoning.delta / thinking.delta), ``tool_progress._progress_reasoning`` (reasoning.available). ``verbose`` rides only when the session's verbose reasoning mode is on. */
 export interface StreamDeltaPayload {
@@ -4904,7 +4921,7 @@ export interface RpcMethods {
   'browser.controller.register': { params: BrowserControllerRegisterParams; result: BrowserControllerRegisterResult }
   /** Deliver one command result to the broker; accepted is false for unknown or settled command ids. */
   'browser.controller.result': { params: BrowserControllerResultParams; result: BrowserControllerResultResult }
-  /** Inspect, attach to, or drop the CDP browser the tools use; ``messages`` narrate a connect. */
+  /** Inspect, attach to, or drop the CDP browser the tools use, or switch Browser Use mode (``use``, applies to new sessions); ``messages`` narrate a connect. */
   'browser.manage': { params: BrowserManageParams; result: BrowserManageResult }
   /** Lock one answer of a batch clarify request (editable until every question is locked). */
   'clarify.lock': { params: ClarifyLockParams; result: ClarifyLockResult }
@@ -5724,6 +5741,8 @@ export interface BackendGatewayEventMap {
   'message.reaction': MessageReactionPayload
   /** A turn began streaming; no payload. */
   'message.start': Record<string, never>
+  /** Project a canonical user turn before streaming; dedupe by message uid / row id / client correlation. */
+  'message.user': MessageUserPayload
   /** The MoA aggregator started. */
   'moa.aggregating': MoaAggregatingPayload
   /** MoA phase transition (currently only ``aggregator``). */
@@ -5853,6 +5872,7 @@ export const GATEWAY_EVENT_TYPES = [
   'message.interim',
   'message.reaction',
   'message.start',
+  'message.user',
   'moa.aggregating',
   'moa.phase',
   'moa.progress',

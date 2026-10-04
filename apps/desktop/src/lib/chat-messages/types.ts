@@ -49,6 +49,8 @@ export type ChatMessage = {
    *  action footer so only the turn's final reply carries copy/refresh, and
    *  the live view matches rehydration (which merges the turn into one bubble). */
   interim?: boolean
+  /** The user stopped this reply before it finished; its text is partial. */
+  interrupted?: boolean
   /** Locally recovered output not yet represented by a durable completed reply. */
   recovered?: boolean
   /** Whether hydration reached a final assistant source row, rather than a tool round. */
@@ -63,6 +65,7 @@ export type ChatMessage = {
   attachmentRefs?: string[]
   /** Durable backend `messages.id`. Absent until the row is persisted. */
   rowId?: number
+  messageUid?: string
   /** Backend transcript rows this message represents — the hydration fold
    *  merges a turn's tool rows into the assistant message they belong to, so a
    *  message is not one backend row. The older-page offset (transcript-tail) is

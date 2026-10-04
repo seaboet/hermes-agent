@@ -105,6 +105,10 @@ _ONESHOT_CLEANUPS = (
     ("tools.browser_tool_lifecycle", "_emergency_cleanup_all_sessions", {}, Exception),
     ("tools.mcp_tool_lifecycle", "shutdown_mcp_servers", {}, BaseException),
     ("agent.auxiliary_client", "shutdown_cached_clients", {}, Exception),
+    # A no-op unless this run booted the managed llama-server (atexit's hook is skipped here).
+    ("hermes_cli.local_runtime.bootstrap", "shutdown_local_runtime", {}, Exception),
+    # The atexit hook that closes the metrics session never runs past os._exit.
+    ("hermes_cli.observability.relay_shared_metrics", "shutdown_runtimes", {}, Exception),
 )
 
 
@@ -342,7 +346,6 @@ from typing import Optional
 
 
 from hermes_cli.subcommands.cron import build_cron_parser
-from hermes_cli.subcommands.sync import build_sync_parser
 from hermes_cli.subcommands.gateway import build_gateway_parser
 from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.model import build_model_parser
@@ -401,6 +404,7 @@ from hermes_cli.subcommands.curator import build_curator_parser
 from hermes_cli.subcommands.pets import build_pets_parser
 from hermes_cli.subcommands.journey import build_journey_parser
 from hermes_cli.subcommands.computer_use import build_computer_use_parser
+from hermes_cli.subcommands.session_ingress import build_session_ingress_parsers
 from hermes_cli.subcommands.sessions import build_sessions_parser
 from hermes_cli.subcommands.queue import build_queue_parser
 from hermes_cli.subcommands.completion import build_completion_parser
@@ -789,6 +793,7 @@ from hermes_cli.model_setup_flows import (
     _model_flow_plugin_provider,
     _is_profile_plugin_flow_provider,
 )
+from hermes_cli.model_setup_flows_local import _model_flow_local
 logger = logging.getLogger(__name__)
 from hermes_cli.main_agent_cmds import (
     cmd_acp,
@@ -800,7 +805,6 @@ from hermes_cli.main_agent_cmds import (
 )
 from hermes_cli.main_platform_setup import (
     cmd_slack,
-    cmd_sync,
     cmd_whatsapp,
     cmd_whatsapp_cloud,
 )
@@ -1867,6 +1871,9 @@ def cmd_chat(args):
         os.environ["HERMES_SESSION_SOURCE_EXPLICIT"] = "1"
 
     _pin_kanban_board_env()
+    from hermes_cli.observability.shared_metrics_consent import offer_consent_before_chat
+
+    offer_consent_before_chat(args)
     _confirm_startup_expensive_model_override(args)
 
     passthrough = {k: getattr(args, k, d) for k, d in _CHAT_PASSTHROUGH}
@@ -2018,6 +2025,7 @@ _PROVIDER_MODEL_FLOWS = {
     "copilot-acp": lambda c, m, a: _model_flow_copilot_acp(c, m),
     "copilot": lambda c, m, a: _model_flow_copilot(c, m),
     "custom": lambda c, m, a: _model_flow_custom(c),
+    "llamacpp": lambda c, m, a: _model_flow_local(c, m),
     "anthropic": lambda c, m, a: _model_flow_anthropic(c, m),
     "kimi-coding": lambda c, m, a: _model_flow_kimi(c, m),
     "stepfun": lambda c, m, a: _model_flow_stepfun(c, m),
@@ -2360,14 +2368,14 @@ def cmd_uninstall(args):
         return
 
     if getattr(args, "gui", False):
-        if not getattr(args, "yes", False):
+        if not getattr(args, "yes", False) and not getattr(args, "dry_run", False):
             _require_tty("uninstall --gui")
         from hermes_cli.uninstall import run_gui_uninstall
 
         run_gui_uninstall(args)
         return
 
-    if not getattr(args, "yes", False):
+    if not getattr(args, "yes", False) and not getattr(args, "dry_run", False):
         _require_tty("uninstall")
     from hermes_cli.uninstall import run_uninstall
 
@@ -2566,7 +2574,7 @@ def _coalesce_session_name_args(argv: list) -> list:
     _SUBCOMMANDS = {
         "chat", "model", "gateway", "setup", "whatsapp", "whatsapp-cloud", "login", "logout",
         "auth", "status", "cron", "doctor", "config", "pairing", "skills", "tools", "mcp",
-        "sessions", "insights", "update", "uninstall", "profile", "dashboard", "serve",
+        "queue", "steer", "sessions", "insights", "update", "uninstall", "profile", "dashboard", "serve",
         "desktop", "gui", "honcho", "claw", "plugins", "security", "acp", "webhook", "peer",
         "memory", "dump", "debug", "backup", "import", "completion", "logs", "usage",
     }
@@ -2812,6 +2820,7 @@ def cmd_dashboard(args):
     _ssh_session_token = _read_ssh_session_token_file(_token_file) if _token_file else None
     _mcp_discovery_after_bind = _dashboard_prepare_runtime(args, _headless_backend)
 
+    from hermes_cli.dashboard_procs import BACKEND_LOCK_NAME
     from hermes_cli.web_server import start_server
 
     # Interactive auth setup: if this bind will engage the auth gate but no
@@ -2837,6 +2846,8 @@ def cmd_dashboard(args):
         ssh_session_token=_ssh_session_token,
         ssh_owner_nonce=_ssh_owner_nonce,
         start_mcp_discovery_after_bind=_mcp_discovery_after_bind,
+        # The validated token file lives in desktop-ssh/<ownershipId>/, next to the Desktop's lock.
+        ssh_lock_path=Path(_token_file).parent / BACKEND_LOCK_NAME if _token_file else None,
     )
 
 
@@ -2893,10 +2904,10 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "journey", "memory-graph", "learning",
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
         "project", "proxy",
-        "prompt-size", "queue",
+        "prompt-size", "queue", "steer",
         "resume",
         "send", "sessions", "setup",
-        "skin", "skills", "slack", "status", "sync", "tools", "uninstall", "update",
+        "skin", "skills", "slack", "status", "tools", "uninstall", "update",
         "usage", "vault",
         "webhook", "whatsapp", "whatsapp-cloud", "worktree", "chat", "secrets", "security",
         "browser",
@@ -3484,7 +3495,6 @@ def _build_cli_parser():
     build_status_parser(subparsers, cmd_status=cmd_status)
     build_pause_parser(subparsers)
     build_cron_parser(subparsers, cmd_cron=cmd_cron)
-    build_sync_parser(subparsers, cmd_sync=cmd_sync)
     build_webhook_parser(subparsers, cmd_webhook=cmd_webhook)
 
     from hermes_cli.subcommands.peer import build_peer_parser
@@ -3528,7 +3538,7 @@ def _build_cli_parser():
     build_computer_use_parser(subparsers)
     build_mcp_parser(subparsers, cmd_mcp=cmd_mcp)
     build_sessions_parser(subparsers, cmd_sessions=_cmd_sessions_lazy)
-    build_queue_parser(subparsers)
+    build_session_ingress_parsers(subparsers)
     build_insights_parser(subparsers, cmd_insights=cmd_insights)
     build_usage_parser(subparsers)
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)

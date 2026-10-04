@@ -7,6 +7,7 @@ import {
   appendMidTurnUserMessage,
   applyReloadOptimistic,
   applyRewindOptimistic,
+  finalizeStoppedMessages,
   finalizeUserInterruptedMessages,
   planEdit,
   planReload,
@@ -342,6 +343,15 @@ describe('finalizeUserInterruptedMessages', () => {
     expect(message.parts[1].interrupted).toBeUndefined()
   })
 
+  it('flags the live reply as interrupted on stop, but not on a redirect finalize', () => {
+    const [stopped] = finalizeStoppedMessages([toolTurn()], 'assistant-tool', 11.25)
+    const [redirected] = finalizeUserInterruptedMessages([toolTurn()], 'assistant-tool', 11.25)
+
+    expect(stopped.interrupted).toBe(true)
+    expect(stopped.parts[1].interrupted).toBe(true)
+    expect(redirected.interrupted).toBeUndefined()
+  })
+
   it('does not mark calls sealed by the non-user settle path', () => {
     const [message] = finalizeInterruptedMessages([toolTurn()], 'assistant-tool', 11.25)
 
@@ -529,11 +539,14 @@ describe('runRewindSubmit durable-address discipline (#87059)', () => {
       false,
       undefined,
       undefined,
-      'typo prompt'
+      'typo prompt',
+      undefined,
+      'optimistic-rewind'
     )
 
     const submit = calls.find(call => call.method === 'prompt.submit')
 
+    expect(submit?.params?.client_message_id).toBe('optimistic-rewind')
     expect(submit?.params?.truncate_before_row_id).toBe(13)
     expect(submit?.params?.truncate_before_user_ordinal).toBeUndefined()
     expect(submit?.params?.confirm_truncate).toBe(true)

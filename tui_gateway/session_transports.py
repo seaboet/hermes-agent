@@ -9,7 +9,7 @@ _session_transport_lock = threading.RLock()
 
 
 def _transport_is_live_peer(transport) -> bool:
-    """The real TUI stdio channel is a client; serve stdout remains a fallback sink."""
+    """Exclude the process fallback sink, parked sentinel, and closed peers."""
     if transport is _stdio_transport:
         return _stdio_is_rpc_channel and not _transport_is_dead(transport)
     return (transport is not None
@@ -46,7 +46,7 @@ def _session_client_answers_requests(sid: str) -> bool:
     from tui_gateway.ws import WSTransport
     peers = _session_live_transports(_sessions.get(sid))
     if _stdio_transport in peers:
-        return True  # The stdio TUI ships with this backend.
+        return True
     clients = [peer for peer in peers if isinstance(peer, WSTransport)]
     return not clients or any(server_requests.answers_requests(peer) for peer in clients)
 

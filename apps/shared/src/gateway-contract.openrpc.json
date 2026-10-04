@@ -314,7 +314,7 @@
     },
     {
       "name": "browser.manage",
-      "summary": "Inspect, attach to, or drop the CDP browser the tools use; ``messages`` narrate a connect.",
+      "summary": "Inspect, attach to, or drop the CDP browser the tools use, or switch Browser Use mode (``use``, applies to new sessions); ``messages`` narrate a connect.",
       "params": [
         {
           "name": "params",
@@ -7120,7 +7120,8 @@
         "enum": [
           "status",
           "connect",
-          "disconnect"
+          "disconnect",
+          "use"
         ],
         "title": "BrowserAction",
         "type": "string"
@@ -7397,6 +7398,18 @@
             "default": null,
             "title": "Url"
           },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Enabled"
+          },
           "session_id": {
             "anyOf": [
               {
@@ -7458,6 +7471,18 @@
             ],
             "default": null,
             "title": "Messages"
+          },
+          "browser_use": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Browser Use"
           }
         },
         "required": [
@@ -7907,6 +7932,21 @@
             ],
             "default": null,
             "title": "Desktop"
+          },
+          "desktop_subcommands": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Desktop Subcommands"
           }
         },
         "title": "CommandCatalogMeta",
@@ -11351,7 +11391,10 @@
           "last_delivery_unverified": {
             "anyOf": [
               {
-                "type": "boolean"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
@@ -18700,6 +18743,27 @@
         "title": "MessageReactionPayload",
         "type": "object"
       },
+      "MessageUserPayload": {
+        "additionalProperties": false,
+        "description": "Canonical submitted user row at dispatch, shared by all attached clients.",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/TranscriptMessage"
+          },
+          "client_message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Client Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MessageUserPayload",
+        "type": "object"
+      },
       "MoaAggregatingPayload": {
         "additionalProperties": false,
         "properties": {
@@ -18838,6 +18902,11 @@
         "properties": {
           "fast": {
             "title": "Fast",
+            "type": "boolean"
+          },
+          "ultrafast": {
+            "default": false,
+            "title": "Ultrafast",
             "type": "boolean"
           },
           "reasoning": {
@@ -21924,6 +21993,7 @@
           "no_interactive_session",
           "version_too_old",
           "missing_app",
+          "unsupported_gpu",
           "unknown"
         ],
         "title": "PluginServerState",
@@ -24394,7 +24464,7 @@
       },
       "ProfilesListResult": {
         "additionalProperties": false,
-        "description": "``bot_mode_protocol`` tells clients this backend injects the teammate protocol itself.",
+        "description": "``bot_mode_protocol`` tells clients this backend injects the teammate protocol itself;\n``install_id`` (as on ``/api/status``) names the machine that answered.",
         "properties": {
           "profiles": {
             "items": {
@@ -24407,6 +24477,11 @@
             "default": true,
             "title": "Bot Mode Protocol",
             "type": "boolean"
+          },
+          "install_id": {
+            "default": "",
+            "title": "Install Id",
+            "type": "string"
           }
         },
         "title": "ProfilesListResult",
@@ -26139,6 +26214,18 @@
           "text": {
             "default": "",
             "title": "Text"
+          },
+          "client_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Client Message Id"
           },
           "display_kind": {
             "anyOf": [
@@ -28634,6 +28721,18 @@
             ],
             "default": null,
             "title": "Count"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idempotency Key"
           }
         },
         "required": [
@@ -28743,6 +28842,18 @@
             ],
             "default": null,
             "title": "Cwd"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idempotency Key"
           }
         },
         "required": [
@@ -28814,6 +28925,18 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idempotency Key"
           }
         },
         "required": [
@@ -29685,6 +29808,18 @@
             "default": null,
             "title": "Fast"
           },
+          "service_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Tier"
+          },
           "close_on_disconnect": {
             "default": false,
             "title": "Close On Disconnect",
@@ -29704,6 +29839,18 @@
             "default": false,
             "title": "Follow Profile Config",
             "type": "boolean"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idempotency Key"
           }
         },
         "title": "SessionCreateParams",
@@ -36535,6 +36682,18 @@
             "default": null,
             "title": "Row Id"
           },
+          "message_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Message Uid"
+          },
           "display_kind": {
             "anyOf": [
               {
@@ -39534,6 +39693,18 @@
           "schema": {
             "type": "object",
             "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "message.user",
+      "summary": "Project a canonical user turn before streaming; dedupe by message uid / row id / client correlation.",
+      "params": [
+        {
+          "name": "payload",
+          "schema": {
+            "$ref": "#/components/schemas/MessageUserPayload"
           }
         }
       ]

@@ -131,6 +131,9 @@ export interface ClarifyReq {
 }
 
 export interface Msg {
+  rowId?: number
+  messageUid?: string
+  clientMessageId?: string
   info?: SessionInfo
   kind?: 'diff' | 'event' | 'intro' | 'panel' | 'slash' | 'trail'
   panelData?: PanelData
@@ -199,6 +202,24 @@ export interface VaultUnlockReq {
   backend: string
   displayName: string
   requestId: string
+}
+
+/**
+ * `vault.save_login` server→client request — save a new website login from a
+ * browser sign-in page. Two-step capture (identifier shown, password masked);
+ * the answer goes only to the encrypted vault, never to the model.
+ */
+export interface VaultSaveLoginReq {
+  origin: string
+  requestId: string
+  site: string
+}
+
+/** `vault.code` server→client request — a one-time sign-in code the user reads from their device. */
+export interface VaultCodeReq {
+  hint: string
+  requestId: string
+  site: string
 }
 
 export interface PanelData {
