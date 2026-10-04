@@ -536,7 +536,7 @@ def _storage_error_data(failure, raw) -> dict:
     return {"code": failure.code, "cause": failure.cause, "details": storage_failure_details(raw)}
 
 
-def _persist_session_row_for_submit(rid, session, text=None, display_kind=None):
+def _persist_session_row_for_submit(rid, session, text=None, display_kind=None, display_metadata=None):
     """Lazily persist the DB row now that the user sent a message (a branch becomes real
     here), then the message itself (#111868: a freeze during the first build must leave a
     resumable transcript); the error reply is the only user-visible signal (desktop maps it to a toast)."""
@@ -551,7 +551,7 @@ def _persist_session_row_for_submit(rid, session, text=None, display_kind=None):
                 data=_storage_error_data(failure, _db_error))
         else:
             _persist_branch_seed(session)
-            _persist_submit_user_row(session, text, display_kind)
+            _persist_submit_user_row(session, text, display_kind, accept_metadata=display_metadata)
             return None
     except Exception as exc:
         failure = describe_storage_failure(exc)
@@ -669,6 +669,8 @@ def _(rid, params: dict) -> dict:
         if isinstance(title_preview, str) and title_preview.strip()
         else None
     )
+    if client_id := params.get("client_message_id"):
+        display_metadata = {**(display_metadata or {}), "client_message_ids": [client_id]}
     if (stopped := _typed_stop_phrase_response(rid, text)) is not None:
         return stopped
     if params.get("interrupted"):
@@ -743,7 +745,7 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4009, "session busy")
         busy_response = _handle_busy_submit(
             rid, sid, session, text, busy_transport, queued=bool(params.get("queued")), turn_author=turn_author,
-            display_kind=display_kind)
+            display_kind=display_kind, client_message_id=params.get("client_message_id"))
         if busy_response is not None:
             return busy_response
     raw_rebind_ids = params.get("rebind_survivor_row_ids")
@@ -775,8 +777,9 @@ def _(rid, params: dict) -> dict:
         logger.warning(
             "compute-host dispatch failed for session %s; falling back inline: %s", sid,
             isolated_response["error"].get("message", "unknown error"))
-    if (err := _persist_session_row_for_submit(rid, session, text, display_kind)) is not None:
+    if (err := _persist_session_row_for_submit(rid, session, text, display_kind, display_metadata)) is not None:
         return err
+    _emit_submit_user_row(sid, session)
     # Capture before starting the worker: it consumes the staging dict and may finish before the RPC returns.
     staged_user = session.get("_submit_user_row") or {}
     if isinstance(staged_user.get("_row_id"), int):
